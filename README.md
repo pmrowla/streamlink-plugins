@@ -2,7 +2,7 @@
 
 Custom plugins for [Streamlink](https://github.com/streamlink/streamlink)
 
-To use these plugins, clone this repo somewhere and run (or configure) streamlink with `--plugin-dirs`.
+To use these plugins, clone this repo somewhere and run (or configure) streamlink with `--plugin-dir`.
 Alternatively, individual plugins can be symlinked or downloaded to `~/.config/streamlink/plugins`
 (`%APPDATA%\streamlink\plugins` on Windows).
 
@@ -18,3 +18,11 @@ Alternatively, individual plugins can be symlinked or downloaded to `~/.config/s
     2. Home
     3. Away
     4. National (French)
+
+## eplus (e+)
+
+https://eplus.jp/ plugin.
+
+- Currently only supports direct `live.eplus.jp` (ticketed) stream or VOD URLs.
+- Streamlink will count as one (desktop brower) "device" against the e+ limit
+  when viewing a stream or VOD.
