@@ -10,11 +10,13 @@ import html
 import re
 import time
 
+from requests.exceptions import HTTPError
+from streamlink.buffers import RingBuffer
 from streamlink.exceptions import StreamError
 from streamlink.plugin import Plugin
 from streamlink.plugin.api import useragents
 from streamlink.plugin.api.utils import itertags
-from streamlink.stream import HLSStream
+from streamlink.stream.hls import HLSStream, HLSStreamReader, HLSStreamWorker
 
 log = logging.getLogger(__name__)
 
@@ -35,28 +37,62 @@ def _get_eplus_data(session, eplus_url):
     return result
 
 
+class EplusHLSStreamWorker(HLSStreamWorker):
+    def __init__(self, *args, eplus_url=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._eplus_url = eplus_url
+
+    def reload_playlist(self):
+        try:
+            return super().reload_playlist()
+        except StreamError as err:
+            rerr = getattr(err, "err", None)
+            if (
+                self._eplus_url
+                and err is not None
+                and isinstance(err, HTTPError)
+                and err.response.status_code == 403
+            ):
+                log.debug("eplus auth rejected, refreshing session")
+                self.session.http.get(
+                    self._eplus_url,
+                    exception=StreamError,
+                    **self.reader.request_params,
+                )
+            else:
+                raise
+        return super().reload_playlist()
+
+
+class EplusHLSStreamReader(HLSStreamReader):
+    __worker__ = EplusHLSStreamWorker
+
+    def __init__(self, *args, eplus_url=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self._eplus_url = eplus_url
+
+    def open(self):
+        buffer_size = self.session.get_option("ringbuffer-size")
+        self.buffer = RingBuffer(buffer_size)
+        self.writer = self.__writer__(self)
+        self.worker = self.__worker__(self, eplus_url=self._eplus_url)
+
+        self.writer.start()
+        self.worker.start()
+
+
 class EplusHLSStream(HLSStream):
-    DEFAULT_TIMEOUT = 60 * 60
+    __reader__ = EplusHLSStreamReader
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.eplus_url = None
-        self.quality = None
-        self.timeout = time.time() + self.DEFAULT_TIMEOUT
 
-    @property
-    def url(self):
-        assert self.eplus_url and self.quality
-        curtime = time.time()
-        if curtime >= self.timeout:
-            channel_url = _get_eplus_data(self.session, self.eplus_url).get("channel_url")
-            if channel_url:
-                stream = EplusHLSStream.parse_variant_playlist(self.session, channel_url)[self.quality]
-                self.args.update(stream.args)
-                self.timeout = curtime + self.DEFAULT_TIMEOUT
-            else:
-                raise StreamError("failed to refresh eplus channel url")
-        return super().url
+    def open(self):
+        reader = self.__reader__(self, eplus_url=self.eplus_url)
+        reader.open()
+
+        return reader
 
 
 class Eplus(Plugin):
@@ -90,7 +126,6 @@ class Eplus(Plugin):
         if channel_url:
             for name, stream in EplusHLSStream.parse_variant_playlist(self.session, channel_url).items():
                 stream.eplus_url = self.url
-                stream.quality = name
                 yield name, stream
 
 
