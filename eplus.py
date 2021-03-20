@@ -49,9 +49,9 @@ class EplusHLSStreamWorker(HLSStreamWorker):
             rerr = getattr(err, "err", None)
             if (
                 self._eplus_url
-                and err is not None
-                and isinstance(err, HTTPError)
-                and err.response.status_code == 403
+                and rerr is not None
+                and isinstance(rerr, HTTPError)
+                and rerr.response.status_code == 403
             ):
                 log.debug("eplus auth rejected, refreshing session")
                 self.session.http.get(
