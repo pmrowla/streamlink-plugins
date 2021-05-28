@@ -24,7 +24,7 @@ Alternatively, individual plugins can be symlinked or downloaded to `~/.config/s
 https://eplus.jp/ plugin.
 
 - Currently only supports direct `live.eplus.jp` (ticketed) stream or VOD URLs.
-- Streamlink will count as one (desktop brower) "device" against the e+ limit
+- Streamlink will count as one (desktop browser) "device" against the e+ limit
   when viewing a stream or VOD.
 - `--player-passthrough=hls` is incompatible with e+ since the video player
   will not have access to the authenticated HTTP session.
