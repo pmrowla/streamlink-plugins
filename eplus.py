@@ -105,11 +105,13 @@ class Eplus(Plugin):
 
     def __init__(self, url):
         super().__init__(url)
-        self.session.http.headers.update({
-            "Origin": self._ORIGIN,
-            "Referer": self._REFERER,
-            "User-Agent": useragents.CHROME,
-        })
+        self.session.http.headers.update(
+            {
+                "Origin": self._ORIGIN,
+                "Referer": self._REFERER,
+                "User-Agent": useragents.CHROME,
+            }
+        )
         self.title = None
 
     @classmethod
@@ -124,7 +126,9 @@ class Eplus(Plugin):
         self.title = data.get("title")
         channel_url = data.get("channel_url")
         if channel_url:
-            for name, stream in EplusHLSStream.parse_variant_playlist(self.session, channel_url).items():
+            for name, stream in EplusHLSStream.parse_variant_playlist(
+                self.session, channel_url
+            ).items():
                 stream.eplus_url = self.url
                 yield name, stream
 
