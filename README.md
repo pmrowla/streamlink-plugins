@@ -28,3 +28,14 @@ https://eplus.jp/ plugin.
   when viewing a stream or VOD.
 - `--player-passthrough=hls` is incompatible with e+ since the video player
   will not have access to the authenticated HTTP session.
+
+## SPWN
+
+https://spwn.jp/ plugin.
+
+- Supports direct `spwn.jp/events/` (ticketed) stream or VOD URLs.
+- Login and valid event ticket required to view any live event or VOD.
+  `--spwn-email` and `--spwn-password` options can be used to specify login
+  credentials. Social account (Twitter/Facebook/Google) login is unsupported.
+- Streamlink will count as one (desktop browser) device against the SPWN limit
+  when viewing a stream or VOD.
