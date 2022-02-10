@@ -10,7 +10,7 @@ import re
 from datetime import datetime, timedelta
 
 import requests
-from streamlink.plugin import Plugin, PluginArgument, PluginArguments
+from streamlink.plugin import Plugin, PluginArgument, PluginArguments, PluginError
 from streamlink.plugin.api import useragents
 from streamlink.plugin.api.utils import itertags
 from streamlink.stream.hls import HLSStream
@@ -32,6 +32,10 @@ class FBSession:
         self._id_token = None
         self.refresh_token = None
         self.refresh_expires = None
+
+    def set_refresh_token(self, refresh_token):
+        self.refresh_token = refresh_token
+        self.expires = datetime.min
 
     def login(self, email, password):
         url = f"{self._IDENTITY_URL}/verifyPassword"
@@ -109,7 +113,6 @@ class Spwn(Plugin):
     arguments = PluginArguments(
         PluginArgument(
             "email",
-            required=True,
             metavar="EMAIL",
             requires=["password"],
             help="The email associated with your SPWN account.",
@@ -119,6 +122,12 @@ class Spwn(Plugin):
             sensitive=True,
             metavar="PASSWORD",
             help="Account password to use with --spwn-email.",
+        ),
+        PluginArgument(
+            "token",
+            sensitive=True,
+            metavar="TOKEN",
+            help="Account token to use with --spwn-token.",
         ),
     )
 
@@ -161,9 +170,13 @@ class Spwn(Plugin):
 
     def _login(self):
         if not self._authed:
-            self._fb.login(
-                self.options.get("email"), self.options.get("password")
-            )
+            token = self.options.get("token")
+            if token:
+                self._fb.set_refresh_token(token)
+            else:
+                self._fb.login(
+                    self.options.get("email"), self.options.get("password")
+                )
             self._authed = True
 
     @classmethod
