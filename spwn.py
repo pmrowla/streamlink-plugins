@@ -5,7 +5,6 @@ Requires valid SPWN account and event tickets.
 """
 
 import logging
-import html
 import re
 from datetime import datetime, timedelta
 
@@ -65,7 +64,7 @@ class FBSession:
             seconds=int(data["expiresIn"])
         )
         self.refresh_token = data["refreshToken"]
-        log.info("Logged into SPWN as {}".format(data["email"]))
+        log.info(f"Logged into SPWN as {data['email']}")
 
     @property
     def id_token(self):
@@ -105,7 +104,7 @@ class FBSession:
 
 class Spwn(Plugin):
 
-    _URL_RE = re.compile(r"https://(virtual\.)?spwn\.jp/events/(?P<eid>.+)")
+    _URL_RE = re.compile(r"https://(virtual\.)?spwn\.jp/events/(?P<eid>[^/]+)")
     _BASE_URL = "https://spwn.jp"
     _BALUS_URL = "https://us-central1-spwn-balus.cloudfunctions.net"
     _PUBLIC_URL = "https://public.spwn.jp"
@@ -222,7 +221,9 @@ class Spwn(Plugin):
         headers = {
             "Authorization": f"Bearer {self._fb.id_token}",
         }
-        result = self.session.http.post(url, headers=headers, json={"eid": eid})
+        result = self.session.http.post(
+            url, headers=headers, json={"eid": eid}
+        )
         return result.json()
 
     def _get_event_data(self, eid):
