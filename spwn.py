@@ -126,7 +126,12 @@ class Spwn(Plugin):
             "token",
             sensitive=True,
             metavar="TOKEN",
-            help="Account token to use with --spwn-token.",
+            help="Account token to use (instead of --spwn-email / --spwn-token).",
+        ),
+        PluginArgument(
+            "video-id",
+            metavar="VIDEO-ID",
+            help="The video ID to stream (if there are multiple in the event to choose from).",
         ),
     )
 
@@ -206,7 +211,9 @@ class Spwn(Plugin):
             msg = stream_info.get("msg", "")
             log.info(f"No available stream for this event: {msg}")
             return
-        video_id = stream_info.get("videoIds", []).pop()
+        video_ids = stream_info.get("videoIds", [])
+        log.info(f"Found video IDs: {video_ids}")
+        video_id = self.options.get("video-id") or [video_id for video_id in video_ids if video_id in cookies][-1]
         info = cookies.get(video_id, {}).get("default", {})
         for k, v in info.get("cookie", {}).items():
             cookie = requests.cookies.create_cookie(k, v)
