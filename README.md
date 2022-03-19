@@ -36,6 +36,7 @@ https://spwn.jp/ plugin.
 - Supports direct `spwn.jp/events/` (ticketed) stream or VOD URLs.
 - Login and valid event ticket required to view any live event or VOD.
   `--spwn-email` and `--spwn-password` options can be used to specify login
-  credentials. Social account (Twitter/Facebook/Google) login is unsupported.
+  credentials. Social account (Twitter/Facebook/Google) login requires
+  specifying the OAuth refresh token directly with `--spwn-token`.
 - Streamlink will count as one (desktop browser) device against the SPWN limit
   when viewing a stream or VOD.
