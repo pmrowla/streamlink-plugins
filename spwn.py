@@ -7,6 +7,7 @@ Requires valid SPWN account and event tickets.
 import logging
 import re
 from datetime import datetime, timedelta
+from typing import Any, Dict, NamedTuple
 
 import requests
 from streamlink.plugin import Plugin, PluginArgument, PluginArguments, PluginError
@@ -15,6 +16,13 @@ from streamlink.plugin.api.utils import itertags
 from streamlink.stream.hls import HLSStream
 
 log = logging.getLogger(__name__)
+
+
+class VideoPart(NamedTuple):
+    video_id: str
+    name: str
+    url: str
+    cookie: Dict[str, Any]
 
 
 class FBSession:
@@ -187,6 +195,15 @@ class Spwn(Plugin):
     def can_handle_url(cls, url):
         return cls._URL_RE.match(url) is not None
 
+    @classmethod
+    def stream_weight(cls, stream):
+        try:
+            _, stream = stream.rsplit("_", 1)
+        except ValueError:
+            pass
+
+        return super().stream_weight(stream)
+
     def get_title(self):
         return self.title
 
@@ -211,20 +228,27 @@ class Spwn(Plugin):
             msg = stream_info.get("msg", "")
             log.info(f"No available stream for this event: {msg}")
             return
-        video_ids = stream_info.get("videoIds", [])
-        log.info(f"Found video IDs: {video_ids}")
-        video_id = self.options.get("video-id") or [video_id for video_id in video_ids if video_id in cookies][-1]
-        info = cookies.get(video_id, {}).get("default", {})
-        for k, v in info.get("cookie", {}).items():
-            cookie = requests.cookies.create_cookie(k, v)
-            self.session.http.cookies.set_cookie(cookie)
-        url = info.get("url")
-        if not url:
-            raise PluginError(f"No stream URL for {video_id}")
-        return HLSStream.parse_variant_playlist(self.session, url)
+        playlist = {}
+        for part in self._get_parts(
+            event_info, stream_info, opt_id=self.options.get("video-id")
+        ):
+            cookies = self.session.http.cookies.copy()
+            for k, v in part.cookie.items():
+                cookie = requests.cookies.create_cookie(k, v)
+                cookies.set_cookie(cookie)
+            name = part.name.replace(" ", "_").lower()
+            playlist.update(
+                HLSStream.parse_variant_playlist(
+                    self.session,
+                    part.url,
+                    name_prefix=f"{name}_" if name else "",
+                    cookies=cookies,
+                )
+            )
+        return playlist
 
     def _get_streaming_key(self, eid):
-        url = f"{self._BALUS_URL}/get_streaming_key/"
+        url = f"{self._BALUS_URL}/getStreamingKey/"
         headers = {
             "Authorization": f"Bearer {self._fb.id_token}",
         }
@@ -237,6 +261,34 @@ class Spwn(Plugin):
         url = f"{self._PUBLIC_URL}/event-pages/{eid}/data.json"
         result = self.session.http.get(url)
         return result.json().get("basic_data", {})
+
+    @staticmethod
+    def _get_parts(event_info, stream_info, opt_id=None):
+        if opt_id:
+            log.info(
+                "--spwn-video-id is deprecated, "
+                "use quality name to select a stream instead"
+            )
+        cookies = stream_info.get("cookies", {})
+        parts = event_info.get("parts", [])
+        # NOTE: have observed videoIds being returned in random order, but
+        # ID naming seems to follow <event>C<n>v<ver> convention, where n is
+        # incremented with part number, so sorting should give us the expected
+        # result
+        for i, video_id in enumerate(sorted(stream_info.get("videoIds", []))):
+            default_cookie = cookies.get(video_id, {}).get("default", {})
+            url = default_cookie.get("url")
+            name = parts[i].get("name", "")
+            if len(parts) > 1:
+                log.info(f"Multi-part event: {name} ({video_id})")
+            if not url or (opt_id and video_id != opt_id):
+                continue
+            yield VideoPart(
+                video_id,
+                name.replace(" ", "_").lower(),
+                url,
+                default_cookie.get("cookie", {})
+            )
 
 
 __plugin__ = Spwn
