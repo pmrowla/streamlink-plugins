@@ -11,8 +11,7 @@ from typing import Any, Dict, NamedTuple
 
 import requests
 from streamlink.plugin import Plugin, PluginArgument, PluginArguments, PluginError
-from streamlink.plugin.api import useragents
-from streamlink.plugin.api.utils import itertags
+from streamlink.plugin.api import useragents, validate
 from streamlink.stream.hls import HLSStream
 
 log = logging.getLogger(__name__)
@@ -163,10 +162,16 @@ class Spwn(Plugin):
 
     def _fetch_fb_api_key(self):
         # get firebase API key
-        body = self.session.http.get(self._BASE_URL).text
+        scripts = self.session.http.get(
+            self._BASE_URL,
+            schema=validate.Schema(
+                validate.parse_html(),
+                validate.xml_findall(".//script")
+            )
+        )
 
-        for script in itertags(body, "script"):
-            src = script.attributes.get("src", "")
+        for script in scripts:
+            src = script.get("src", "")
             m = re.match(r"/static/js/main.*\.js", src)
             if m:
                 break
