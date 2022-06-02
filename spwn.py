@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from typing import Any, Dict, NamedTuple
 
 import requests
+from requests.exceptions import HTTPError
 from streamlink.plugin import Plugin, PluginArgument, PluginArguments, PluginError
 from streamlink.plugin.api import useragents, validate
 from streamlink.stream.hls import HLSStream
@@ -212,6 +213,11 @@ class Spwn(Plugin):
     def get_title(self):
         return self.title
 
+    @staticmethod
+    def _raise_ticket(stream_info):
+        if not stream_info.get("hasTickets"):
+            raise PluginError("You do not have a ticket for this event")
+
     def _get_streams(self):
         try:
             self._login()
@@ -219,17 +225,16 @@ class Spwn(Plugin):
             raise PluginError("SPWN login failed") from e
         m = self._URL_RE.match(self.url)
         eid = m.group("eid")
-        event_info = self._get_event_data(eid)
+        event_info = self._get_event_info(eid)
         self.title = event_info.get("title", eid)
         log.info(f"Found SPWN event: {self.title}")
         stream_info = self._get_streaming_key(eid)
         if stream_info.get("isError"):
+            self._raise_ticket(stream_info)
             raise PluginError("Error fetching stream info from SPWN API")
         cookies = stream_info.get("cookies")
         if not cookies:
-            if not stream_info.get("hasTickets"):
-                log.error("You do not have a ticket for this event")
-                return
+            self._raise_ticket(stream_info)
             msg = stream_info.get("msg", "")
             log.info(f"No available stream for this event: {msg}")
             return
@@ -262,10 +267,25 @@ class Spwn(Plugin):
         )
         return result.json()
 
+    def _get_event_info(self, eid):
+        try:
+            return self._get_event_data(eid)
+        except (HTTPError, PluginError):
+            pass
+        return self._get_goods_data(eid)
+
     def _get_event_data(self, eid):
         url = f"{self._PUBLIC_URL}/event-pages/{eid}/data.json"
         result = self.session.http.get(url)
         return result.json().get("basic_data", {})
+
+    def _get_goods_data(self, eid):
+        url = f"{self._BALUS_URL}/getSellingGoods/"
+        result = self.session.http.get(url, params={"eventId": eid})
+        title = ""
+        goods = result.json().get("data", [])
+        title = goods[-1].get("eventTitle", eid) if goods else eid
+        return {"title": title, "parts": [{"name": ""}]}
 
     @staticmethod
     def _get_parts(event_info, stream_info, opt_id=None):
