@@ -8,14 +8,12 @@ unsupported).
 import logging
 import html
 import re
-import time
 
 from requests.exceptions import HTTPError
 from streamlink.buffers import RingBuffer
 from streamlink.exceptions import StreamError
 from streamlink.plugin import Plugin
-from streamlink.plugin.api import useragents
-from streamlink.plugin.api.utils import itertags
+from streamlink.plugin.api import validate, useragents
 from streamlink.stream.hls import HLSStream, HLSStreamReader, HLSStreamWorker
 
 log = logging.getLogger(__name__)
@@ -28,9 +26,11 @@ def _get_eplus_data(session, eplus_url):
     """
     result = {}
     body = session.http.get(eplus_url).text
-    for title in itertags(body, "title"):
-        result["title"] = html.unescape(title.text.strip())
-        break
+    title = validate.Schema(
+        validate.parse_html(),
+        validate.xml_xpath_string(".//head/title/text()"),
+    ).validate(body)
+    result["title"] = html.unescape(title.strip())
     m = re.search(r"""var listChannels = \["(?P<channel_url>.*)"\]""", body)
     if m:
         result["channel_url"] = m.group("channel_url").replace(r"\/", "/")
