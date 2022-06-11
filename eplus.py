@@ -62,7 +62,7 @@ class EplusSessionUpdater(Thread):
                 return
 
             # Create a new session, and send a request to Eplus url to obtain the cookies4
-            log.info('[EplusSessionUpdater] Refreshing cookies...')
+            log.debug('[EplusSessionUpdater] Refreshing cookies...')
             fresh_response = self._session.http.get(self._eplus_url, headers={
                 'Cookie': ''
             })
@@ -70,7 +70,7 @@ class EplusSessionUpdater(Thread):
             # Update the session with the new cookies
             self._session.http.cookies.clear()
             self._session.http.cookies.update(fresh_response.cookies)
-            log.info(f'[EplusSessionUpdater] Successfully updated cookies: Got {len(fresh_response.cookies)} cookies')
+            log.debug(f'[EplusSessionUpdater] Successfully updated cookies: <{repr(fresh_response.cookies)}>')
 
             self.wait_for_about_half_hour()
 
@@ -81,7 +81,9 @@ class EplusSessionUpdater(Thread):
 
         e.g. To avoid multiple people visiting Eplus at the same time, a random interval is used.
         """
-        self._closed.wait(random.randint(20 * 60, 40 * 60))
+        wait_sec = random.randint(20 * 60, 40 * 60)
+        log.debug(f'[EplusSessionUpdater] Will update again after {wait_sec // 60}m {wait_sec % 60}s')
+        self._closed.wait(wait_sec)
 
 
 class EplusHLSStreamWorker(HLSStreamWorker):
