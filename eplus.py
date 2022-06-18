@@ -9,7 +9,9 @@ import logging
 import html
 import random
 import re
+from time import time as get_timestamp_second
 from threading import Thread, Event
+from typing import List
 
 from requests.cookies import RequestsCookieJar
 from requests.exceptions import HTTPError
@@ -17,14 +19,13 @@ from streamlink.buffers import RingBuffer
 from streamlink.exceptions import StreamError
 from streamlink.plugin import Plugin
 from streamlink.plugin.api import validate, useragents
-from streamlink.stream.hls import HLSStream, HLSStreamReader, HLSStreamWorker
+from streamlink.stream.hls import HLSStream, HLSStreamReader, HLSStreamWorker, Sequence
+from streamlink.stream.hls_playlist import M3U8
 
 log = logging.getLogger(__name__)
-random.seed()
 
-# Record the timestamp (second) of last playlist reloading.
-last_playlist_reload = 1e12
-
+# If the playlist keeps unchange for PLAYLIST_UNCHANGE_THRESHOLD_SEC, we consider the playlist ended.
+PLAYLIST_UNCHANGE_THRESHOLD_SEC = 15
 
 def _get_eplus_data(session, eplus_url):
     """Return video data for an eplus event/video page.
@@ -53,7 +54,7 @@ class EplusSessionUpdater(Thread):
         super().__init__(name='EplusSessionUpdater', daemon=True)
 
     def close(self):
-        log.info('[EplusSessionUpdater] Closing...')
+        log.info('[ipid] [EplusSessionUpdater] Closing...')
         self._closed.set()
 
     def run(self):
@@ -62,7 +63,7 @@ class EplusSessionUpdater(Thread):
                 return
 
             # Create a new session, and send a request to Eplus url to obtain the cookies4
-            log.debug('[EplusSessionUpdater] Refreshing cookies...')
+            log.debug('[ipid] [EplusSessionUpdater] Refreshing cookies...')
             fresh_response = self._session.http.get(self._eplus_url, headers={
                 'Cookie': ''
             })
@@ -70,7 +71,7 @@ class EplusSessionUpdater(Thread):
             # Update the session with the new cookies
             self._session.http.cookies.clear()
             self._session.http.cookies.update(fresh_response.cookies)
-            log.debug(f'[EplusSessionUpdater] Successfully updated cookies: <{repr(fresh_response.cookies)}>')
+            log.debug(f'[ipid] [EplusSessionUpdater] Successfully updated cookies: <{repr(fresh_response.cookies)}>')
 
             self.wait_for_about_half_hour()
 
@@ -82,7 +83,7 @@ class EplusSessionUpdater(Thread):
         e.g. To avoid multiple people visiting Eplus at the same time, a random interval is used.
         """
         wait_sec = random.randint(20 * 60, 40 * 60)
-        log.debug(f'[EplusSessionUpdater] Will update again after {wait_sec // 60}m {wait_sec % 60}s')
+        log.debug(f'[ipid] [EplusSessionUpdater] Will update again after {wait_sec // 60}m {wait_sec % 60}s')
         self._closed.wait(wait_sec)
 
 
@@ -90,17 +91,19 @@ class EplusHLSStreamWorker(HLSStreamWorker):
     def __init__(self, *args, eplus_url=None, **kwargs):
         super().__init__(*args, **kwargs)
         self._eplus_url = eplus_url
+        self._first_playlist_unchanged = None
 
-    def reload_playlist(self):
+    def _reload_playlist_helper(self):
         try:
+            log.debug('[ipid] [EplusHLSStreamWorker] Reloading playlist...')
             return super().reload_playlist()
         except StreamError as err:
             rerr = getattr(err, "err", None)
             if (
-                self._eplus_url
-                and rerr is not None
-                and isinstance(rerr, HTTPError)
-                and rerr.response.status_code == 403
+                    self._eplus_url
+                    and rerr is not None
+                    and isinstance(rerr, HTTPError)
+                    and rerr.response.status_code == 403
             ):
                 log.debug("eplus auth rejected, refreshing session")
                 self.session.http.get(
@@ -110,7 +113,26 @@ class EplusHLSStreamWorker(HLSStreamWorker):
                 )
             else:
                 raise
+
         return super().reload_playlist()
+
+    def reload_playlist(self):
+        reload_result = self._reload_playlist_helper()
+        log.debug(f'[ipid] [EplusHLSStreamWorker] Playlist reloaded. self.playlist_changed = {self.playlist_changed}, _first_playlist_unchanged = {self._first_playlist_unchanged}')
+        if not self.playlist_changed:
+            current_time = get_timestamp_second()
+            if self._first_playlist_unchanged is None:
+                self._first_playlist_unchanged = current_time
+
+            if current_time - self._first_playlist_unchanged > PLAYLIST_UNCHANGE_THRESHOLD_SEC:
+                log.debug(f'[ipid] [EplusHLSStreamWorker] Unchage threshold exceed. current_time = {current_time}, self._first_playlist_unchanged = {self._first_playlist_unchanged}')
+
+                # The playlist won't change. Close the stream.
+                self.close()
+            else:
+                log.debug(f'[ipid] [EplusHLSStreamWorker] Playlist unchanged but threshold does not exceed. current_time = {current_time}, self._first_playlist_unchanged = {self._first_playlist_unchanged}')
+
+        return reload_result
 
 
 class EplusHLSStreamReader(HLSStreamReader):
@@ -152,7 +174,6 @@ class EplusHLSStream(HLSStream):
 
 
 class Eplus(Plugin):
-
     # https://live.eplus.jp/ex/player?ib=<key>
     # key is base64-encoded 64 byte unique key per ticket
     _URL_RE = re.compile(r"https://live\.eplus\.jp/ex/player\?ib=.+")
@@ -183,7 +204,7 @@ class Eplus(Plugin):
         channel_url = data.get("channel_url")
         if channel_url:
             for name, stream in EplusHLSStream.parse_variant_playlist(
-                self.session, channel_url
+                    self.session, channel_url
             ).items():
                 stream.eplus_url = self.url
                 yield name, stream
