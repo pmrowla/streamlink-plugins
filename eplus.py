@@ -120,6 +120,7 @@ class EplusHLSStreamWorker(HLSStreamWorker):
         reload_result = self._reload_playlist_helper()
         log.debug(f'[ipid] [EplusHLSStreamWorker] Playlist reloaded. self.playlist_changed = {self.playlist_changed}, _first_playlist_unchanged = {self._first_playlist_unchanged}')
         if not self.playlist_changed:
+            # If playlist unchanged, check if the stream is actually ended.
             current_time = get_timestamp_second()
             if self._first_playlist_unchanged is None:
                 self._first_playlist_unchanged = current_time
@@ -131,6 +132,9 @@ class EplusHLSStreamWorker(HLSStreamWorker):
                 self.close()
             else:
                 log.debug(f'[ipid] [EplusHLSStreamWorker] Playlist unchanged but threshold does not exceed. current_time = {current_time}, self._first_playlist_unchanged = {self._first_playlist_unchanged}')
+        else:
+            # If playlost changed, reset first_playlist_unchanged.
+            self._first_playlist_unchanged = None
 
         return reload_result
 
