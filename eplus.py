@@ -54,7 +54,7 @@ class EplusSessionUpdater(Thread):
         super().__init__(name='EplusSessionUpdater', daemon=True)
 
     def close(self):
-        log.info('[ipid] [EplusSessionUpdater] Closing...')
+        log.info('[EplusSessionUpdater] Closing...')
         self._closed.set()
 
     def run(self):
@@ -63,15 +63,21 @@ class EplusSessionUpdater(Thread):
                 return
 
             # Create a new session, and send a request to Eplus url to obtain the cookies4
-            log.debug('[ipid] [EplusSessionUpdater] Refreshing cookies...')
-            fresh_response = self._session.http.get(self._eplus_url, headers={
-                'Cookie': ''
-            })
+            log.debug('[EplusSessionUpdater] Refreshing cookies...')
+            try:
+                # TODO: Use another session to get the cookies, instead of using existing session.
+                fresh_response = self._session.http.get(self._eplus_url, headers={
+                    'Cookie': ''
+                })
 
-            # Update the session with the new cookies
-            self._session.http.cookies.clear()
-            self._session.http.cookies.update(fresh_response.cookies)
-            log.debug(f'[ipid] [EplusSessionUpdater] Successfully updated cookies: <{repr(fresh_response.cookies)}>')
+                # Update the session with the new cookies
+                self._session.http.cookies.clear()
+                self._session.http.cookies.update(fresh_response.cookies)
+                log.debug(f'[EplusSessionUpdater] Successfully updated cookies: <{repr(fresh_response.cookies)}>')
+
+            except Exception as e:
+                # TODO: Retry refresh cookies
+                log.error(f'[EplusSessionUpdater] Failed to refresh cookies: \n{e}')
 
             self.wait_for_about_half_hour()
 
@@ -83,7 +89,7 @@ class EplusSessionUpdater(Thread):
         e.g. To avoid multiple people visiting Eplus at the same time, a random interval is used.
         """
         wait_sec = random.randint(20 * 60, 40 * 60)
-        log.debug(f'[ipid] [EplusSessionUpdater] Will update again after {wait_sec // 60}m {wait_sec % 60}s')
+        log.debug(f'[EplusSessionUpdater] Will update again after {wait_sec // 60}m {wait_sec % 60}s')
         self._closed.wait(wait_sec)
 
 
@@ -95,7 +101,7 @@ class EplusHLSStreamWorker(HLSStreamWorker):
 
     def _reload_playlist_helper(self):
         try:
-            log.debug('[ipid] [EplusHLSStreamWorker] Reloading playlist...')
+            log.debug('[EplusHLSStreamWorker] Reloading playlist...')
             return super().reload_playlist()
         except StreamError as err:
             rerr = getattr(err, "err", None)
@@ -118,7 +124,8 @@ class EplusHLSStreamWorker(HLSStreamWorker):
 
     def reload_playlist(self):
         reload_result = self._reload_playlist_helper()
-        log.debug(f'[ipid] [EplusHLSStreamWorker] Playlist reloaded. self.playlist_changed = {self.playlist_changed}, _first_playlist_unchanged = {self._first_playlist_unchanged}')
+        log.debug(f'[EplusHLSStreamWorker] Playlist reloaded. self.playlist_changed = {self.playlist_changed}, _first_playlist_unchanged = {self._first_playlist_unchanged}')
+
         if not self.playlist_changed:
             # If playlist unchanged, check if the stream is actually ended.
             current_time = get_timestamp_second()
@@ -126,14 +133,16 @@ class EplusHLSStreamWorker(HLSStreamWorker):
                 self._first_playlist_unchanged = current_time
 
             if current_time - self._first_playlist_unchanged > PLAYLIST_UNCHANGE_THRESHOLD_SEC:
-                log.debug(f'[ipid] [EplusHLSStreamWorker] Unchage threshold exceed. current_time = {current_time}, self._first_playlist_unchanged = {self._first_playlist_unchanged}')
+                log.debug(f'[EplusHLSStreamWorker] Unchage threshold exceed. current_time = {current_time}, self._first_playlist_unchanged = {self._first_playlist_unchanged}')
 
                 # The playlist won't change. Close the stream.
                 self.close()
             else:
-                log.debug(f'[ipid] [EplusHLSStreamWorker] Playlist unchanged but threshold does not exceed. current_time = {current_time}, self._first_playlist_unchanged = {self._first_playlist_unchanged}')
+                log.debug(f'[EplusHLSStreamWorker] Playlist unchanged but threshold does not exceed. current_time = {current_time}, self._first_playlist_unchanged = {self._first_playlist_unchanged}')
         else:
             # If playlist changed, reset first_playlist_unchanged.
+            if self._first_playlist_unchanged is not None:
+                log.debug(f'[EplusHLSStreamWorker] Playlist changed. Reset _first_playlist_unchanged to None.')
             self._first_playlist_unchanged = None
 
         return reload_result
