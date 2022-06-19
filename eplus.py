@@ -133,7 +133,7 @@ class EplusHLSStreamWorker(HLSStreamWorker):
             else:
                 log.debug(f'[ipid] [EplusHLSStreamWorker] Playlist unchanged but threshold does not exceed. current_time = {current_time}, self._first_playlist_unchanged = {self._first_playlist_unchanged}')
         else:
-            # If playlost changed, reset first_playlist_unchanged.
+            # If playlist changed, reset first_playlist_unchanged.
             self._first_playlist_unchanged = None
 
         return reload_result
