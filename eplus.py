@@ -52,6 +52,7 @@ class EplusSessionUpdater(Thread):
         self._closed = Event()
         self._retries = 0
         self._last_expire_timestamp = time.time()
+        self._log = logging.getLogger(f'{__name__}.{self.__class__.__qualname__}')
 
         super().__init__(name='EplusSessionUpdater', daemon=True)
 
@@ -59,26 +60,26 @@ class EplusSessionUpdater(Thread):
         if self._closed.is_set():
             """
             "close(self)" will be called multiple times during the cleanup process of Streamlink.
-            If Python is about to exit, calling "log.debug()" will raise an exception:
+            If Python is about to exit, logging something will raise an exception:
             > ImportError: sys.meta_path is None, Python is likely shutting down <
             """
             return
 
-        log.debug('[EplusSessionUpdater] Closing session updater...')
+        self._log.debug('Closing session updater...')
         self._closed.set()
 
     def run(self):
-        log.debug('[EplusSessionUpdater] Starting session updater...')
+        self._log.debug('Starting session updater...')
 
         while True:
             if self._closed.is_set():
                 return
 
             # Create a new session without cookies and send a request to Eplus url to obtain new cookies.
-            log.debug('[EplusSessionUpdater] Refreshing cookies...')
+            self._log.debug('Refreshing cookies...')
             try:
                 fresh_response = self._session_duplicator().get(self._eplus_url)
-                log.debug(f'[EplusSessionUpdater] Got new cookies: {repr(fresh_response.cookies)}')
+                self._log.debug(f'Got new cookies: {repr(fresh_response.cookies)}')
 
                 # Filter cookies.
                 # For now, only the "ci_session" cookie is what we don't need, so ignore it.
@@ -87,8 +88,8 @@ class EplusSessionUpdater(Thread):
                         if cookie.name != 'ci_session'
                         and cookie.expires > time.time()
                 )
-                log.debug(
-                    '[EplusSessionUpdater] Found a valid cookie that will expire at '
+                self._log.debug(
+                    'Found a valid cookie that will expire at '
                     f'{time.strftime(r"%Y%m%d-%H%M%S%z", time.localtime(cookie.expires))}. '
                     f'The cookie: {repr(cookie)}'
                 )
@@ -106,8 +107,8 @@ class EplusSessionUpdater(Thread):
                     # It's too close! Retry it right away.
                     wait_sec = 0
 
-                log.debug(
-                    '[EplusSessionUpdater] Refreshed cookies. Next attempt will be at about '
+                self._log.debug(
+                    'Refreshed cookies. Next attempt will be at about '
                     f'{time.strftime(r"%Y%m%d-%H%M%S%z", time.localtime(time.time() + wait_sec))}. '
                 )
 
@@ -116,21 +117,21 @@ class EplusSessionUpdater(Thread):
 
             except StopIteration as e:
                 # next() exhausted all cookies.
-                log.error('[EplusSessionUpdater] No valid cookies found.')
+                self._log.error('No valid cookies found.')
 
             except Exception as e:
-                log.error(f'[EplusSessionUpdater] Failed to refresh cookies: {e}')
+                self._log.error(f'Failed to refresh cookies: {e}')
 
             self._retries += 1
             retry_delay_sec = 2 ** (self._retries - 1)
 
             if time.time() + retry_delay_sec > self._last_expire_timestamp + 1 * 60 * 60:
-                log.error('[EplusSessionUpdater] We have not refreshed cookies in the past hour and will not try again.')
+                self._log.error('We have not refreshed cookies in the past hour and will not try again.')
 
                 self.close()
                 return
 
-            log.debug(f'[EplusSessionUpdater] We will retry in {retry_delay_sec}s.')
+            self._log.debug(f'We will retry in {retry_delay_sec}s.')
 
             self._closed.wait(retry_delay_sec)
             continue
