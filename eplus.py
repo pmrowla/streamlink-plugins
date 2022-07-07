@@ -54,7 +54,7 @@ class EplusSessionUpdater(Thread):
         self._last_expire_timestamp = time.time()
         self._log = logging.getLogger(f'{__name__}.{self.__class__.__qualname__}')
 
-        super().__init__(name='EplusSessionUpdater', daemon=True)
+        super().__init__(name=self.__class__.__qualname__, daemon=True)
 
     def close(self):
         if self._closed.is_set():
