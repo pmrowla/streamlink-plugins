@@ -52,7 +52,7 @@ class EplusSessionUpdater(Thread):
         self._closed = Event()
         self._retries = 0
         self._last_expire_timestamp = time.time()
-        self._log = logging.getLogger(f'{__name__}.{self.__class__.__qualname__}')
+        self._log = logging.getLogger(f"{__name__}.{self.__class__.__qualname__}")
 
         super().__init__(name=self.__class__.__qualname__, daemon=True)
 
@@ -65,33 +65,33 @@ class EplusSessionUpdater(Thread):
             """
             return
 
-        self._log.debug('Closing session updater...')
+        self._log.debug("Closing session updater...")
         self._closed.set()
 
     def run(self):
-        self._log.debug('Starting session updater...')
+        self._log.debug("Starting session updater...")
 
         while True:
             if self._closed.is_set():
                 return
 
             # Create a new session without cookies and send a request to Eplus url to obtain new cookies.
-            self._log.debug('Refreshing cookies...')
+            self._log.debug("Refreshing cookies...")
             try:
                 fresh_response = self._session_duplicator().get(self._eplus_url)
-                self._log.debug(f'Got new cookies: {repr(fresh_response.cookies)}')
+                self._log.debug(f"Got new cookies: {repr(fresh_response.cookies)}")
 
                 # Filter cookies.
                 # For now, only the "ci_session" cookie is what we don't need, so ignore it.
                 cookie = next(
                     cookie for cookie in fresh_response.cookies
-                        if cookie.name != 'ci_session'
+                        if cookie.name != "ci_session"
                         and cookie.expires > time.time()
                 )
                 self._log.debug(
-                    'Found a valid cookie that will expire at '
-                    f'{time.strftime(r"%Y%m%d-%H%M%S%z", time.localtime(cookie.expires))}. '
-                    f'The cookie: {repr(cookie)}'
+                    "Found a valid cookie that will expire at "
+                    f"{time.strftime(r'%Y%m%d-%H%M%S%z', time.localtime(cookie.expires))}. "
+                    f"The cookie: {repr(cookie)}"
                 )
 
                 # Update the global session with the new cookies.
@@ -108,8 +108,8 @@ class EplusSessionUpdater(Thread):
                     wait_sec = 0
 
                 self._log.debug(
-                    'Refreshed cookies. Next attempt will be at about '
-                    f'{time.strftime(r"%Y%m%d-%H%M%S%z", time.localtime(time.time() + wait_sec))}. '
+                    "Refreshed cookies. Next attempt will be at about "
+                    f"{time.strftime(r'%Y%m%d-%H%M%S%z', time.localtime(time.time() + wait_sec))}. "
                 )
 
                 self._closed.wait(wait_sec)
@@ -117,21 +117,21 @@ class EplusSessionUpdater(Thread):
 
             except StopIteration as e:
                 # next() exhausted all cookies.
-                self._log.error('No valid cookies found.')
+                self._log.error("No valid cookies found.")
 
             except Exception as e:
-                self._log.error(f'Failed to refresh cookies: {e}')
+                self._log.error(f"Failed to refresh cookies: {e}")
 
             self._retries += 1
             retry_delay_sec = 2 ** (self._retries - 1)
 
             if time.time() + retry_delay_sec > self._last_expire_timestamp + 1 * 60 * 60:
-                self._log.error('We have not refreshed cookies in the past hour and will not try again.')
+                self._log.error("We have not refreshed cookies in the past hour and will not try again.")
 
                 self.close()
                 return
 
-            self._log.debug(f'We will retry in {retry_delay_sec}s.')
+            self._log.debug(f"We will retry in {retry_delay_sec}s.")
 
             self._closed.wait(retry_delay_sec)
             continue
