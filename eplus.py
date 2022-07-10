@@ -71,9 +71,7 @@ class EplusSessionUpdater(Thread):
     def run(self):
         self._log.debug("Starting session updater...")
 
-        while True:
-            if self._closed.is_set():
-                return
+        while not self._closed.is_set():
 
             # Create a new session without cookies and send a request to Eplus url to obtain new cookies.
             self._log.debug("Refreshing cookies...")
