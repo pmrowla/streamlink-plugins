@@ -159,25 +159,7 @@ class EplusHLSStreamWorker(HLSStreamWorker):
         self._eplus_url = eplus_url
 
     def reload_playlist(self):
-        try:
-            return super().reload_playlist()
-        except StreamError as err:
-            rerr = getattr(err, "err", None)
-            if (
-                self._eplus_url
-                and rerr is not None
-                and isinstance(rerr, HTTPError)
-                and rerr.response.status_code == 403
-            ):
-                log.debug("eplus auth rejected, refreshing session")
-                self.session.http.get(
-                    self._eplus_url,
-                    exception=StreamError,
-                    **self.reader.request_params,
-                )
-            else:
-                raise
-        return super().reload_playlist()
+        super().reload_playlist()
 
 
 class EplusHLSStreamReader(HLSStreamReader):
