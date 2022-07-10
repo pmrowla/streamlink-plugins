@@ -152,9 +152,8 @@ class EplusSessionUpdater(Thread):
 
 
 class EplusHLSStreamWorker(HLSStreamWorker):
-    def __init__(self, *args, eplus_url=None, **kwargs):
+    def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self._eplus_url = eplus_url
 
     def reload_playlist(self):
         super().reload_playlist()
@@ -172,7 +171,7 @@ class EplusHLSStreamReader(HLSStreamReader):
         buffer_size = self.session.get_option("ringbuffer-size")
         self.buffer = RingBuffer(buffer_size)
         self.writer = self.__writer__(self)
-        self.worker = self.__worker__(self, eplus_url=self._eplus_url)
+        self.worker = self.__worker__(self)
 
         self.writer.start()
         self.worker.start()
