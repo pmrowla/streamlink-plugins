@@ -11,7 +11,7 @@ from typing import Any, Dict, NamedTuple
 
 import requests
 from requests.exceptions import HTTPError
-from streamlink.plugin import Plugin, PluginArgument, PluginArguments, PluginError
+from streamlink.plugin import Plugin, PluginArgument, PluginArguments, PluginError, pluginmatcher
 from streamlink.plugin.api import useragents, validate
 from streamlink.stream.hls import HLSStream
 
@@ -110,9 +110,11 @@ class FBSession:
         return self._id_token
 
 
+@pluginmatcher(re.compile(
+    r"https://(virtual\.)?spwn\.jp/events/(?P<eid>[^/]+)"
+))
 class Spwn(Plugin):
 
-    _URL_RE = re.compile(r"https://(virtual\.)?spwn\.jp/events/(?P<eid>[^/]+)")
     _BASE_URL = "https://spwn.jp"
     _BALUS_URL = "https://us-central1-spwn-balus.cloudfunctions.net"
     _PUBLIC_URL = "https://public.spwn.jp"
@@ -198,10 +200,6 @@ class Spwn(Plugin):
             self._authed = True
 
     @classmethod
-    def can_handle_url(cls, url):
-        return cls._URL_RE.match(url) is not None
-
-    @classmethod
     def stream_weight(cls, stream):
         try:
             _, stream = stream.rsplit("_", 1)
@@ -223,8 +221,7 @@ class Spwn(Plugin):
             self._login()
         except Exception as e:
             raise PluginError("SPWN login failed") from e
-        m = self._URL_RE.match(self.url)
-        eid = m.group("eid")
+        eid = self.match.group("eid")
         event_info = self._get_event_info(eid)
         self.title = event_info.get("title", eid)
         log.info(f"Found SPWN event: {self.title}")
