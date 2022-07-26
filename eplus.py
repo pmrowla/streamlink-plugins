@@ -154,9 +154,37 @@ class EplusSessionUpdater(Thread):
 class EplusHLSStreamWorker(HLSStreamWorker):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+        self._log = logging.getLogger(f"{__name__}.{self.__class__.__qualname__}")
+        self._playlist_unchanged_timeout = 0.5 * self.session.options.get("stream-timeout")
+        self._playlist_changed_timestamp = time.time()
 
     def reload_playlist(self):
         super().reload_playlist()
+        """
+        For the live streaming of Eplus, there is no "#EXT-X-ENDLIST" tag in the playlists. It's OK because they are "Live
+        Playlists" (rfc8216 § 6.2.2). However, when a live ends, the playlist still doesn't contain an "#EXT-X-ENDLIST" tag,
+        and its content has not been changed since then. At the same time, the "worker" (self) keeps reloading the playlist
+        but is not able to get any new stream. Since no new data is written to the buffer, after "stream-timeout" seconds,
+        the "reader" will throw an exception and cause Streamlink to exit with a non-zero code.
+        Thus, to gracefully shutdown Streamlink, we think:
+          If the playlist remains unchanged for a while, the live has ended.
+        """
+        if self.playlist_changed:
+            self._playlist_changed_timestamp = time.time()
+            self._log.debug(
+                "Playlist has been changed at "
+                f"{time.strftime(r'%Y%m%d-%H%M%S%z', time.localtime(self._playlist_changed_timestamp))} "
+                f"({self._playlist_changed_timestamp}). "
+            )
+        else:
+            if (time.time() - self._playlist_changed_timestamp) > self._playlist_unchanged_timeout:
+                self._log.debug(
+                    f"The {self._playlist_unchanged_timeout}-second timeout reached, "
+                    "this is the last playlist. "
+                )
+                self.close()
+            else:
+                self._log.debug("Playlist was unchanged, continue waiting...")
 
 
 class EplusHLSStreamReader(HLSStreamReader):
