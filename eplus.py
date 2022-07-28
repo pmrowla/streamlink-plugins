@@ -171,20 +171,12 @@ class EplusHLSStreamWorker(HLSStreamWorker):
         """
         if self.playlist_changed:
             self._playlist_changed_timestamp = time.time()
+        elif (time.time() - self._playlist_changed_timestamp) > self._playlist_unchanged_timeout:
             self._log.debug(
-                "Playlist has been changed at "
-                f"{time.strftime(r'%Y%m%d-%H%M%S%z', time.localtime(self._playlist_changed_timestamp))} "
-                f"({self._playlist_changed_timestamp}). "
+                f"The {self._playlist_unchanged_timeout}-second timeout reached, "
+                "this is the last playlist. "
             )
-        else:
-            if (time.time() - self._playlist_changed_timestamp) > self._playlist_unchanged_timeout:
-                self._log.debug(
-                    f"The {self._playlist_unchanged_timeout}-second timeout reached, "
-                    "this is the last playlist. "
-                )
-                self.close()
-            else:
-                self._log.debug("Playlist was unchanged, continue waiting...")
+            self.close()
 
 
 class EplusHLSStreamReader(HLSStreamReader):
