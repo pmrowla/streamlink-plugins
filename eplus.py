@@ -14,7 +14,7 @@ from threading import Thread, Event
 from requests.exceptions import HTTPError
 from streamlink.buffers import RingBuffer
 from streamlink.exceptions import StreamError
-from streamlink.plugin import Plugin
+from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.plugin.api import validate, useragents, HTTPSession
 from streamlink.stream.hls import HLSStream, HLSStreamReader, HLSStreamWorker
 
@@ -216,11 +216,13 @@ class EplusHLSStream(HLSStream):
         return reader
 
 
+# https://live.eplus.jp/ex/player?ib=<key>
+# key is base64-encoded 64 byte unique key per ticket
+@pluginmatcher(re.compile(
+    r"https://live\.eplus\.jp/ex/player\?ib=.+"
+))
 class Eplus(Plugin):
 
-    # https://live.eplus.jp/ex/player?ib=<key>
-    # key is base64-encoded 64 byte unique key per ticket
-    _URL_RE = re.compile(r"https://live\.eplus\.jp/ex/player\?ib=.+")
     _ORIGIN = "https://live.eplus.jp"
     _REFERER = "https://live.eplus.jp/"
 
@@ -234,10 +236,6 @@ class Eplus(Plugin):
             }
         )
         self.title = None
-
-    @classmethod
-    def can_handle_url(cls, url):
-        return cls._URL_RE.match(url) is not None
 
     def get_title(self):
         return self.title

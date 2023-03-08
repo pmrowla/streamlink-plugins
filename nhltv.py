@@ -7,7 +7,7 @@ import time
 
 import requests.cookies
 
-from streamlink.plugin import Plugin, PluginArgument, PluginArguments, PluginError
+from streamlink.plugin import Plugin, PluginArgument, PluginArguments, PluginError, pluginmatcher
 from streamlink.plugin.api import useragents
 from streamlink.stream import HLSStream
 
@@ -49,7 +49,6 @@ NHL_TEAMS = {
 }
 
 
-_URL_RE = re.compile(r"https://www.nhl.com/tv/(?P<game_pk>\d+)")
 _STATS_API_URL = "https://statsapi.web.nhl.com/api/v1"
 _MEDIA_API_URL = "https://mf.svc.nhl.com/ws/media/mf/v2.4"
 _LOGIN_URL = "https://gateway.web.nhl.com/ws/subscription/flow/nhlPurchase.login"
@@ -61,6 +60,9 @@ def now_ms():
     return int(round(time.time() * 1000))
 
 
+@pluginmatcher(re.compile(
+    r"https://www.nhl.com/tv/(?P<game_pk>\d+)"
+))
 class NHLTV(Plugin):
 
     NATIONAL_WEIGHT = 4
@@ -116,13 +118,8 @@ class NHLTV(Plugin):
                 "User-Agent": useragents.CHROME,
             }
         )
-        match = _URL_RE.match(url).groupdict()
-        self.game_pk = match.get("game_pk")
+        self.game_pk = self.match.group("game_pk")
         self.prefer_team = None
-
-    @classmethod
-    def can_handle_url(cls, url):
-        return _URL_RE.match(url) is not None
 
     @classmethod
     def stream_weight(cls, key):
