@@ -188,13 +188,7 @@ class EplusHLSStreamReader(HLSStreamReader):
         self.session_updater = EplusSessionUpdater(session=self.session, eplus_url=eplus_url)
 
     def open(self):
-        buffer_size = self.session.get_option("ringbuffer-size")
-        self.buffer = RingBuffer(buffer_size)
-        self.writer = self.__writer__(self)
-        self.worker = self.__worker__(self)
-
-        self.writer.start()
-        self.worker.start()
+        super().open()
         self.session_updater.start()
 
     def close(self):
