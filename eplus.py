@@ -13,7 +13,7 @@ from threading import Thread, Event
 
 from requests.exceptions import HTTPError
 from streamlink.buffers import RingBuffer
-from streamlink.exceptions import StreamError
+from streamlink.exceptions import NoStreamsError, PluginError, StreamError
 from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.plugin.api import validate, useragents, HTTPSession
 from streamlink.stream.hls import HLSStream, HLSStreamReader, HLSStreamWorker
@@ -26,17 +26,65 @@ def _get_eplus_data(session, eplus_url):
 
     URL should be in the form https://live.eplus.jp/ex/player?ib=<key>
     """
-    result = {}
+    schema_data_json = validate.Schema(
+        re.compile(r"<script>\s*var\s+app\s*=\s*(?P<data_json>\{.+?\});\s*</script>"),
+        validate.none_or_all(
+            validate.get("data_json"),
+            validate.parse_json(),
+            {
+                "delivery_status": str,
+                "archive_mode": str,
+                "app_id": str,
+                "app_name": str,
+            },
+        ),
+    )
+    schema_list_channels = validate.Schema(
+        re.compile(r"var\s+listChannels\s*=\s*(?P<list_channels>\[.+?\]);"),
+        validate.none_or_all(
+            validate.get("list_channels"),
+            validate.parse_json(),
+        ),
+    )
+
     body = session.http.get(eplus_url).text
-    title = validate.Schema(
-        validate.parse_html(),
-        validate.xml_xpath_string(".//head/title/text()"),
-    ).validate(body)
-    result["title"] = html.unescape(title.strip())
-    m = re.search(r"""var listChannels = \["(?P<channel_url>.*)"\]""", body)
-    if m:
-        result["channel_url"] = m.group("channel_url").replace(r"\/", "/")
-    return result
+
+    data_json = schema_data_json.validate(body, "data_json")
+    if not data_json:
+        raise PluginError("Failed to get data_json")
+
+    delivery_status = data_json["delivery_status"]
+    archive_mode = data_json["archive_mode"]
+    log.debug(f"delivery_status = {delivery_status}, archive_mode = {archive_mode}")
+
+    if delivery_status == "PREPARING":
+        log.error("This event has not started yet")
+        raise NoStreamsError(eplus_url)
+    elif delivery_status == "STARTED":
+        pass  # is live
+    elif delivery_status == "STOPPED":
+        if archive_mode == "ON":
+            log.error("This event has ended, but the archive has not been generated yet")
+        else:
+            log.error("This event has ended and there is no archive for this event")
+        raise NoStreamsError(eplus_url)
+    elif delivery_status == "WAIT_CONFIRM_ARCHIVED":
+        log.error("This event has ended, and the archive will be available shortly")
+        raise NoStreamsError(eplus_url)
+    elif delivery_status == "CONFIRMED_ARCHIVE":
+        pass  # was live
+    else:
+        raise PluginError(f"Unknown delivery_status: {delivery_status}")
+
+    channel_urls = schema_list_channels.validate(body, "list_channels")
+    if not channel_urls:
+        raise PluginError("Failed to get list_channels")
+
+    return {
+        "id": data_json["app_id"],
+        "title": data_json["app_name"],
+        "channel_urls": channel_urls,
+    }
 
 
 class EplusSessionUpdater(Thread):
@@ -236,9 +284,15 @@ class Eplus(Plugin):
 
     def _get_streams(self):
         data = _get_eplus_data(self.session, self.url)
+        self.id = data.get("id")
         self.title = data.get("title")
-        channel_url = data.get("channel_url")
-        if channel_url:
+        channel_urls = data.get("channel_urls")
+
+        # Multiple m3u8 playlists? I have never seen it.
+        # For recent events of "Revue Starlight", a "multi-angle video" does not mean that there are
+        #   multiple playlists, but multiple cameras in one video. That's an edited video so viewers
+        #   cannot switch views.
+        for channel_url in channel_urls:
             for name, stream in EplusHLSStream.parse_variant_playlist(
                 self.session, channel_url
             ).items():
