@@ -300,7 +300,10 @@ class Spwn(Plugin):
         for i, video_id in enumerate(sorted(stream_info.get("videoIds", []))):
             default_cookie = cookies.get(video_id, {}).get("default", {})
             url = default_cookie.get("url")
-            name = parts[i].get("name", "")
+            try:
+                name = parts[i].get("name", "")
+            except IndexError:
+                name = ""
             if len(parts) > 1:
                 log.info(f"Multi-part event: {name} ({video_id})")
             if not url or (opt_id and video_id != opt_id):
