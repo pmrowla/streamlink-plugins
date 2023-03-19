@@ -38,5 +38,8 @@ https://spwn.jp/ plugin.
   `--spwn-email` and `--spwn-password` options can be used to specify login
   credentials. Social account (Twitter/Facebook/Google) login requires
   specifying the OAuth refresh token directly with `--spwn-token`.
+- When the `--spwn-low-latency` option is set and a low-latency (LL) stream is
+  available, it will be preferred over the default stream.
+  (`--spwn-low-latency` has no effect for VOD URLs)
 - Streamlink will count as one (desktop browser) device against the SPWN limit
   when viewing a stream or VOD.

@@ -11,7 +11,7 @@ from typing import Any, Dict, NamedTuple
 
 import requests
 from requests.exceptions import HTTPError
-from streamlink.plugin import Plugin, PluginArgument, PluginArguments, PluginError, pluginmatcher
+from streamlink.plugin import Plugin, PluginError, pluginargument, pluginmatcher
 from streamlink.plugin.api import useragents, validate
 from streamlink.stream.hls import HLSStream
 
@@ -113,37 +113,39 @@ class FBSession:
 @pluginmatcher(re.compile(
     r"https://(virtual\.)?spwn\.jp/events/(?P<eid>[^/]+)"
 ))
+@pluginargument(
+    "email",
+    metavar="EMAIL",
+    requires=["password"],
+    help="The email associated with your SPWN account.",
+)
+@pluginargument(
+    "password",
+    sensitive=True,
+    metavar="PASSWORD",
+    help="Account password to use with --spwn-email.",
+)
+@pluginargument(
+    "token",
+    sensitive=True,
+    metavar="TOKEN",
+    help="Account token to use (instead of --spwn-email / --spwn-token).",
+)
+@pluginargument(
+    "video-id",
+    metavar="VIDEO-ID",
+    help="The video ID to stream (if there are multiple in the event to choose from).",
+)
+@pluginargument(
+    "low-latency",
+    help="Prefer low latency (LL) live stream when available.",
+    action="store_true",
+)
 class Spwn(Plugin):
 
     _BASE_URL = "https://spwn.jp"
     _BALUS_URL = "https://us-central1-spwn-balus.cloudfunctions.net"
     _PUBLIC_URL = "https://public.spwn.jp"
-
-    arguments = PluginArguments(
-        PluginArgument(
-            "email",
-            metavar="EMAIL",
-            requires=["password"],
-            help="The email associated with your SPWN account.",
-        ),
-        PluginArgument(
-            "password",
-            sensitive=True,
-            metavar="PASSWORD",
-            help="Account password to use with --spwn-email.",
-        ),
-        PluginArgument(
-            "token",
-            sensitive=True,
-            metavar="TOKEN",
-            help="Account token to use (instead of --spwn-email / --spwn-token).",
-        ),
-        PluginArgument(
-            "video-id",
-            metavar="VIDEO-ID",
-            help="The video ID to stream (if there are multiple in the event to choose from).",
-        ),
-    )
 
     def __init__(self, url):
         super().__init__(url)
@@ -284,8 +286,7 @@ class Spwn(Plugin):
         title = goods[-1].get("eventTitle", eid) if goods else eid
         return {"title": title, "parts": [{"name": ""}]}
 
-    @staticmethod
-    def _get_parts(event_info, stream_info, opt_id=None):
+    def _get_parts(self, event_info, stream_info, opt_id=None):
         if opt_id:
             log.info(
                 "--spwn-video-id is deprecated, "
@@ -299,8 +300,15 @@ class Spwn(Plugin):
         # result
         video_ids = sorted(stream_info.get("videoIds", []))
         for i, video_id in enumerate(video_ids, start=1):
-            default_cookie = cookies.get(video_id, {}).get("default", {})
-            url = default_cookie.get("url")
+            url = None
+            if self.options.get("low-latency"):
+                ll_cookie = cookies.get(video_id, {}).get("LL", {})
+                url = ll_cookie.get("url")
+                if url:
+                    log.info(f"Low-latency stream available for {video_id}")
+            if not url:
+                default_cookie = cookies.get(video_id, {}).get("default", {})
+                url = default_cookie.get("url")
             try:
                 name = parts[i].get("name", "part{i}")
             except IndexError:
