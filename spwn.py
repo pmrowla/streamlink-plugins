@@ -297,14 +297,15 @@ class Spwn(Plugin):
         # ID naming seems to follow <event>C<n>v<ver> convention, where n is
         # incremented with part number, so sorting should give us the expected
         # result
-        for i, video_id in enumerate(sorted(stream_info.get("videoIds", []))):
+        video_ids = sorted(stream_info.get("videoIds", []))
+        for i, video_id in enumerate(video_ids, start=1):
             default_cookie = cookies.get(video_id, {}).get("default", {})
             url = default_cookie.get("url")
             try:
-                name = parts[i].get("name", "")
+                name = parts[i].get("name", "part{i}")
             except IndexError:
-                name = ""
-            if len(parts) > 1:
+                name = f"part{i}"
+            if len(parts) > 1 or len(video_ids) > 1:
                 log.info(f"Multi-part event: {name} ({video_id})")
             if not url or (opt_id and video_id != opt_id):
                 continue
