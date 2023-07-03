@@ -306,9 +306,11 @@ class Spwn(Plugin):
                 url = ll_cookie.get("url")
                 if url:
                     log.info(f"Low-latency stream available for {video_id}")
+                cookie = ll_cookie.get("cookie", {})
             if not url:
                 default_cookie = cookies.get(video_id, {}).get("default", {})
                 url = default_cookie.get("url")
+                cookie = default_cookie.get("cookie", {})
             try:
                 name = parts[i].get("name", "part{i}")
             except IndexError:
@@ -321,7 +323,7 @@ class Spwn(Plugin):
                 video_id,
                 name.replace(" ", "_").lower(),
                 url,
-                default_cookie.get("cookie", {})
+                cookie,
             )
 
 
