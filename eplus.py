@@ -268,8 +268,8 @@ class Eplus(Plugin):
     _ORIGIN = "https://live.eplus.jp"
     _REFERER = "https://live.eplus.jp/"
 
-    def __init__(self, url):
-        super().__init__(url)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.session.http.headers.update(
             {
                 "Origin": self._ORIGIN,

@@ -109,8 +109,8 @@ class NHLTV(Plugin):
         ),
     )
 
-    def __init__(self, url):
-        super(NHLTV, self).__init__(url)
+    def __init__(self, *args, **kwargs):
+        super(NHLTV, self).__init__(*args, **kwargs)
         self.session.http.headers.update(
             {
                 "Origin": "https://www.nhl.com",

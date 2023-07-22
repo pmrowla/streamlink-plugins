@@ -147,8 +147,8 @@ class Spwn(Plugin):
     _BALUS_URL = "https://us-central1-spwn-balus.cloudfunctions.net"
     _PUBLIC_URL = "https://public.spwn.jp"
 
-    def __init__(self, url):
-        super().__init__(url)
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.session.http.headers.update(
             {
                 "Origin": self._BASE_URL,
