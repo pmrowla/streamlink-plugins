@@ -43,3 +43,14 @@ https://spwn.jp/ plugin.
   (`--spwn-low-latency` has no effect for VOD URLs)
 - Streamlink will count as one (desktop browser) device against the SPWN limit
   when viewing a stream or VOD.
+
+## Z-aN
+
+https://www.zan-live.com/ plugin.
+
+- Supports direct `zan-live.com/live/play` (ticketed) stream or VOD URLs.
+- Login and valid event ticket required to view any live event or VOD.
+  `--zan-email` and `--zan-password` options can be used to specify login
+  credentials.
+- Streamlink will count as one (desktop browser) device against the Z-aN limit
+  when viewing a stream or VOD.
