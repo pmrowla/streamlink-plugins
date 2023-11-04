@@ -274,7 +274,7 @@ class Eplus(Plugin):
             {
                 "Origin": self._ORIGIN,
                 "Referer": self._REFERER,
-                "User-Agent": useragents.CHROME,
+                "User-Agent": useragents.SAFARI,
             }
         )
         self.title = None
