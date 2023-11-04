@@ -6,14 +6,11 @@ unsupported).
 """
 
 import logging
-import html
 import re
 import time
 from threading import Thread, Event
 
-from requests.exceptions import HTTPError
-from streamlink.buffers import RingBuffer
-from streamlink.exceptions import NoStreamsError, PluginError, StreamError
+from streamlink.exceptions import NoStreamsError, PluginError
 from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.plugin.api import validate, useragents, HTTPSession
 from streamlink.stream.hls import HLSStream, HLSStreamReader, HLSStreamWorker
@@ -161,7 +158,7 @@ class EplusSessionUpdater(Thread):
                 self._closed.wait(wait_sec)
                 continue
 
-            except StopIteration as e:
+            except StopIteration:
                 # next() exhausted all cookies.
                 self._log.error("No valid cookies found.")
 
@@ -286,7 +283,7 @@ class Eplus(Plugin):
         data = _get_eplus_data(self.session, self.url)
         self.id = data.get("id")
         self.title = data.get("title")
-        channel_urls = data.get("channel_urls")
+        channel_urls = data.get("channel_urls") or []
 
         # Multiple m3u8 playlists? I have never seen it.
         # For recent events of "Revue Starlight", a "multi-angle video" does not mean that there are
