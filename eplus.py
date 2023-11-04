@@ -36,6 +36,7 @@ def _get_eplus_data(session, eplus_url):
                 "archive_mode": str,
                 "app_id": str,
                 "app_name": str,
+                validate.optional("drmEncryptKey"): dict,
             },
         ),
     )
@@ -52,6 +53,9 @@ def _get_eplus_data(session, eplus_url):
     data_json = schema_data_json.validate(body, "data_json")
     if not data_json:
         raise PluginError("Failed to get data_json")
+
+    if 'drmEncryptKey' in data_json:
+        raise PluginError("Stream is DRM-protected")
 
     delivery_status = data_json["delivery_status"]
     archive_mode = data_json["archive_mode"]
@@ -274,7 +278,7 @@ class Eplus(Plugin):
             {
                 "Origin": self._ORIGIN,
                 "Referer": self._REFERER,
-                "User-Agent": useragents.CHROME,
+                "User-Agent": useragents.SAFARI,
             }
         )
         self.title = None
