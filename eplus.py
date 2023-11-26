@@ -51,7 +51,7 @@ def _get_eplus_data(session, eplus_url):
     if not data_json:
         raise PluginError("Failed to get data_json")
 
-    if 'drmEncryptKey' in data_json:
+    if "drmEncryptKey" in data_json:
         raise PluginError("Stream is DRM-protected")
 
     delivery_status = data_json["delivery_status"]
@@ -266,7 +266,7 @@ class EplusHLSStream(HLSStream):
 ))
 # DRM test page
 @pluginmatcher(re.compile(
-    r'https://live\.eplus\.jp/sample'
+    r"https://live\.eplus\.jp/sample"
 ))
 class Eplus(Plugin):
 
