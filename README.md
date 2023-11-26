@@ -28,6 +28,9 @@ https://eplus.jp/ plugin.
   when viewing a stream or VOD.
 - `--player-passthrough=hls` is incompatible with e+ since the video player
   will not have access to the authenticated HTTP session.
+- DRM-protected content is NOT supported. If you have been notified that an
+  event is only available for Microsoft Edge on Windows or Safari on macOS,
+  it's DRM.
 
 ## SPWN
 

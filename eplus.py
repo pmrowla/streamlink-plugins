@@ -264,6 +264,10 @@ class EplusHLSStream(HLSStream):
 @pluginmatcher(re.compile(
     r"https://live\.eplus\.jp/ex/player\?ib=.+"
 ))
+# DRM test page
+@pluginmatcher(re.compile(
+    r'https://live\.eplus\.jp/sample'
+))
 class Eplus(Plugin):
 
     _ORIGIN = "https://live.eplus.jp"
