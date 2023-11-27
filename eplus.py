@@ -6,14 +6,11 @@ unsupported).
 """
 
 import logging
-import html
 import re
 import time
 from threading import Thread, Event
 
-from requests.exceptions import HTTPError
-from streamlink.buffers import RingBuffer
-from streamlink.exceptions import NoStreamsError, PluginError, StreamError
+from streamlink.exceptions import NoStreamsError, PluginError
 from streamlink.plugin import Plugin, pluginmatcher
 from streamlink.plugin.api import validate, useragents, HTTPSession
 from streamlink.stream.hls import HLSStream, HLSStreamReader, HLSStreamWorker
@@ -36,6 +33,7 @@ def _get_eplus_data(session, eplus_url):
                 "archive_mode": str,
                 "app_id": str,
                 "app_name": str,
+                validate.optional("drmEncryptKey"): dict,
             },
         ),
     )
@@ -52,6 +50,9 @@ def _get_eplus_data(session, eplus_url):
     data_json = schema_data_json.validate(body, "data_json")
     if not data_json:
         raise PluginError("Failed to get data_json")
+
+    if "drmEncryptKey" in data_json:
+        raise PluginError("Stream is DRM-protected")
 
     delivery_status = data_json["delivery_status"]
     archive_mode = data_json["archive_mode"]
@@ -161,7 +162,7 @@ class EplusSessionUpdater(Thread):
                 self._closed.wait(wait_sec)
                 continue
 
-            except StopIteration as e:
+            except StopIteration:
                 # next() exhausted all cookies.
                 self._log.error("No valid cookies found.")
 
@@ -263,6 +264,10 @@ class EplusHLSStream(HLSStream):
 @pluginmatcher(re.compile(
     r"https://live\.eplus\.jp/ex/player\?ib=.+"
 ))
+# DRM test page
+@pluginmatcher(re.compile(
+    r"https://live\.eplus\.jp/sample"
+))
 class Eplus(Plugin):
 
     _ORIGIN = "https://live.eplus.jp"
@@ -274,7 +279,7 @@ class Eplus(Plugin):
             {
                 "Origin": self._ORIGIN,
                 "Referer": self._REFERER,
-                "User-Agent": useragents.CHROME,
+                "User-Agent": useragents.SAFARI,
             }
         )
         self.title = None
@@ -286,7 +291,7 @@ class Eplus(Plugin):
         data = _get_eplus_data(self.session, self.url)
         self.id = data.get("id")
         self.title = data.get("title")
-        channel_urls = data.get("channel_urls")
+        channel_urls = data.get("channel_urls") or []
 
         # Multiple m3u8 playlists? I have never seen it.
         # For recent events of "Revue Starlight", a "multi-angle video" does not mean that there are
