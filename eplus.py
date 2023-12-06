@@ -89,7 +89,7 @@ def _get_eplus_data(session, eplus_url):
 
     app_id = data_json["app_id"]
 
-    if 'ex/player?ib=' in eplus_url:
+    if "ex/player?ib=" in eplus_url:
         # Eplus inbound
         session_update_url = eplus_url
     else:
