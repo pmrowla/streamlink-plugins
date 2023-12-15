@@ -269,7 +269,7 @@ class EplusHLSStream(HLSStream):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.session_update_url = None
+        self.session_update_url = kwargs["session_update_url"]
 
     def open(self):
         reader = self.__reader__(self, session_update_url=self.session_update_url)
@@ -336,18 +336,16 @@ class Eplus(Plugin):
         #   multiple playlists, but multiple cameras in one video. That's an edited video so viewers
         #   cannot switch views.
         for channel_url in channel_urls:
-            for name, stream in EplusHLSStream.parse_variant_playlist(
-                self.session, channel_url
-            ).items():
-                stream.session_update_url = session_update_url
-                yield name, stream
+            yield from EplusHLSStream.parse_variant_playlist(
+                self.session, channel_url, session_update_url=session_update_url,
+            ).items()
 
     def _check_auth_status_and_try_login(self):
         self._log.info("Getting auth status")
 
         res = self.session.http.get(self.url)
         if res.url.startswith(self.url):
-            # already logged in
+            # already logged in or no login required
             return
 
         auth_url = res.url
