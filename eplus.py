@@ -170,7 +170,7 @@ class EplusSessionUpdater(Thread):
                     # It's too close! Retry it right away.
                     wait_sec = 0
                 elif wait_sec > 900:
-                    # Eplus local refresh the session within 15 minutes.
+                    # Eplus local refresh cookies within 15 minutes.
                     # The "expires" in the cookies should not be trusted.
                     wait_sec = 900
 
