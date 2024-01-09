@@ -8,17 +8,19 @@ import logging
 import re
 import time
 from threading import Thread, Event
+from typing import Callable, Dict
 from urllib.parse import urlencode
 
 from streamlink.exceptions import NoStreamsError, PluginError
 from streamlink.plugin import Plugin, pluginargument, pluginmatcher
 from streamlink.plugin.api import validate, useragents, HTTPSession
+from streamlink.session import Streamlink
 from streamlink.stream.hls import HLSStream, HLSStreamReader, HLSStreamWorker
 
 log = logging.getLogger(__name__)
 
 
-def _get_eplus_data(session, eplus_url):
+def _get_eplus_data(http_session: HTTPSession, eplus_url: str):
     """Return video data for an eplus event/video page.
 
     URL should be in the form https://live.eplus.jp/ex/player?ib=<key>
@@ -49,7 +51,7 @@ def _get_eplus_data(session, eplus_url):
         validate.get("stream_session"),
     )
 
-    body = session.http.get(eplus_url).text
+    body = http_session.get(eplus_url).text
 
     data_json = schema_data_json.validate(body, "data_json")
     if not data_json:
@@ -104,6 +106,64 @@ def _get_eplus_data(session, eplus_url):
     }
 
 
+def _check_auth_status_and_try_login(http_session: HTTPSession, eplus_url: str, login_id: str, password: str):
+    log.info("Getting auth status")
+
+    res = http_session.get(eplus_url)
+    if res.url.startswith(eplus_url):
+        # already logged in or no login required
+        return
+
+    auth_url = res.url
+
+    cltft_token = res.headers.get("X-CLTFT-Token")
+    if not cltft_token:
+        raise PluginError("Unable to get X-CLTFT-Token for login")
+
+    http_session.cookies.set("X-CLTFT-Token", cltft_token, domain="live.eplus.jp")
+
+    if login_id is None or password is None:
+        raise PluginError("Login credentials required")
+
+    log.info("Sending pre-login info")
+
+    login_res = http_session.post(
+        "https://live.eplus.jp/member/api/v1/FTAuth/idpw", headers={
+            "Content-Type": "application/json; charset=UTF-8",
+            "Referer": auth_url,
+            "X-Cltft-Token": cltft_token,
+            "Accept": "*/*",
+        }, json={
+            "loginId": login_id,
+            "loginPassword": password,
+        })
+    login_json = http_session.json(login_res, "login response")
+
+    if not login_json.get("isSuccess"):
+        raise PluginError("Login failed: Invalid id or password")
+
+    log.info("Logging in via provided id and password")
+
+    http_session.post(
+        auth_url, data=urlencode({
+            "loginId": id,
+            "loginPassword": password,
+            "Token.Default": cltft_token,
+            "op": "nextPage",
+        }), headers={
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Referer": res.url,
+        })
+
+
+def _get_eplus_data_func(eplus_url: str, login_id: str, password: str) -> Callable[[HTTPSession], Dict[str, str]]:
+    def __getter(http_session: HTTPSession):
+        _check_auth_status_and_try_login(http_session, eplus_url, login_id, password)
+        return _get_eplus_data(http_session, eplus_url)
+
+    return __getter
+
+
 class EplusSessionUpdater(Thread):
     """
     Cookies for Eplus expire after about 1 hour.
@@ -111,13 +171,15 @@ class EplusSessionUpdater(Thread):
     otherwise we may got HTTP 403 and no new stream could be downloaded.
     """
 
-    def __init__(self, session, session_update_url):
-        self._session_update_url = session_update_url
+    def __init__(self, session: Streamlink, eplus_data_getter: Callable[[HTTPSession], Dict[str, str]]):
+        self._eplus_data_getter = eplus_data_getter
         self._session = session
         self._closed = Event()
         self._retries = 0
         self._last_expire_timestamp = time.time()
         self._log = logging.getLogger(f"{__name__}.{self.__class__.__qualname__}")
+
+        self._session_update_url = self._eplus_data_getter(self._session.http).get("session_update_url") or ""
 
         super().__init__(name=self.__class__.__qualname__, daemon=True)
 
@@ -139,7 +201,7 @@ class EplusSessionUpdater(Thread):
         while not self._closed.is_set():
 
             # Create a new session without cookies and send a request to Eplus url to obtain new cookies.
-            self._log.debug("Refreshing cookies...")
+            self._log.debug(f"Refreshing cookies with url: {self._session_update_url}")
             try:
                 fresh_response = self._session_duplicator().get(self._session_update_url)
                 self._log.debug(f"Got new cookies: {repr(fresh_response.cookies)}")
@@ -185,6 +247,14 @@ class EplusSessionUpdater(Thread):
             except StopIteration:
                 # next() exhausted all cookies.
                 self._log.error("No valid cookies found.")
+
+                if "ex/player?ib=" not in self._session_update_url:
+                    # Re-login may help
+                    logged_in_http_session = self._session_duplicator()
+                    # Let it raise; we need logs
+                    self._session_update_url = self._eplus_data_getter(logged_in_http_session)["session_update_url"]
+                    self._session.http.cookies.clear()
+                    self._session.http.cookies.update(logged_in_http_session.cookies)
 
             except Exception as e:
                 self._log.error(f"Failed to refresh cookies: {e}")
@@ -251,9 +321,11 @@ class EplusHLSStreamWorker(HLSStreamWorker):
 class EplusHLSStreamReader(HLSStreamReader):
     __worker__ = EplusHLSStreamWorker
 
-    def __init__(self, *args, session_update_url=None, **kwargs):
+    def __init__(self, *args, eplus_data_getter: Callable[[HTTPSession], Dict[str, str]], **kwargs):
         super().__init__(*args, **kwargs)
-        self.session_updater = EplusSessionUpdater(session=self.session, session_update_url=session_update_url)
+        self.session_updater = EplusSessionUpdater(
+            session=self.session, eplus_data_getter=eplus_data_getter
+        )
 
     def open(self):
         super().open()
@@ -266,13 +338,13 @@ class EplusHLSStreamReader(HLSStreamReader):
 
 class EplusHLSStream(HLSStream):
     __reader__ = EplusHLSStreamReader
+    _eplus_data_getter: Callable[[HTTPSession], Dict[str, str]]
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        self.session_update_url = None
 
     def open(self):
-        reader = self.__reader__(self, session_update_url=self.session_update_url)
+        reader = self.__reader__(self, eplus_data_getter=self._eplus_data_getter)
         reader.open()
 
         return reader
@@ -318,18 +390,18 @@ class Eplus(Plugin):
         )
         self.title = None
         self._log = logging.getLogger(f"{__name__}.{self.__class__.__qualname__}")
+        self._eplus_data_getter = _get_eplus_data_func(
+            self.url, self.get_option("id"), self.get_option("password")
+        )
 
     def get_title(self):
         return self.title
 
     def _get_streams(self):
-        self._check_auth_status_and_try_login()
-
-        data = _get_eplus_data(self.session, self.url)
+        data = self._eplus_data_getter(self.session.http)
         self.id = data.get("id")
         self.title = data.get("title")
         channel_urls = data.get("channel_urls") or []
-        session_update_url = data.get("session_update_url")
 
         # Multiple m3u8 playlists? I have never seen it.
         # For recent events of "Revue Starlight", a "multi-angle video" does not mean that there are
@@ -339,60 +411,8 @@ class Eplus(Plugin):
             for name, stream in EplusHLSStream.parse_variant_playlist(
                 self.session, channel_url
             ).items():
-                stream.session_update_url = session_update_url
+                stream._eplus_data_getter = self._eplus_data_getter
                 yield name, stream
-
-    def _check_auth_status_and_try_login(self):
-        self._log.info("Getting auth status")
-
-        res = self.session.http.get(self.url)
-        if res.url.startswith(self.url):
-            # already logged in or no login required
-            return
-
-        auth_url = res.url
-
-        cltft_token = res.headers.get("X-CLTFT-Token")
-        if not cltft_token:
-            raise PluginError("Unable to get X-CLTFT-Token for login")
-
-        self.session.http.cookies.set("X-CLTFT-Token", cltft_token, domain="live.eplus.jp")
-
-        login_id = self.get_option("id")
-        password = self.get_option("password")
-
-        if login_id is None or password is None:
-            raise PluginError("Login credentials required")
-
-        self._log.info("Sending pre-login info")
-
-        login_res = self.session.http.post(
-            "https://live.eplus.jp/member/api/v1/FTAuth/idpw", headers={
-                "Content-Type": "application/json; charset=UTF-8",
-                "Referer": auth_url,
-                "X-Cltft-Token": cltft_token,
-                "Accept": "*/*",
-            }, json={
-                "loginId": login_id,
-                "loginPassword": password,
-            })
-        login_json = self.session.http.json(login_res, "login response")
-
-        if not login_json.get("isSuccess"):
-            raise PluginError("Login failed: Invalid id or password")
-
-        self._log.info("Logging in via provided id and password")
-
-        self.session.http.post(
-            auth_url, data=urlencode({
-                "loginId": id,
-                "loginPassword": password,
-                "Token.Default": cltft_token,
-                "op": "nextPage",
-            }), headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Referer": res.url,
-            })
 
 
 __plugin__ = Eplus
