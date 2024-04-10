@@ -8,22 +8,20 @@ import logging
 import re
 import time
 from threading import Thread, Event
-from typing import Callable, Dict
+from typing import Dict, List
 from urllib.parse import urlencode
 
 from streamlink.exceptions import NoStreamsError, PluginError
 from streamlink.plugin import Plugin, pluginargument, pluginmatcher
 from streamlink.plugin.api import validate, useragents, HTTPSession
-from streamlink.session import Streamlink
 from streamlink.stream.hls import HLSStream, HLSStreamReader, HLSStreamWorker
 
 log = logging.getLogger(__name__)
 
 
-def _get_eplus_data(http_session: HTTPSession, eplus_url: str):
-    """Return video data for an eplus event/video page.
-
-    URL should be in the form https://live.eplus.jp/ex/player?ib=<key>
+def _get_eplus_data(session: HTTPSession, eplus_url: str):
+    """
+    Return video data for an eplus event/video page.
     """
     schema_data_json = validate.Schema(
         re.compile(r"<script>\s*var\s+app\s*=\s*(?P<data_json>\{.+?\});\s*</script>"),
@@ -48,10 +46,12 @@ def _get_eplus_data(http_session: HTTPSession, eplus_url: str):
     )
     schema_stream_session = validate.Schema(
         re.compile(r"var\s+streamSession\s*=\s*(['\"])(?P<stream_session>(?:(?!\1).)+)\1;"),
-        validate.get("stream_session"),
+        validate.none_or_all(
+            validate.get("stream_session"),
+        ),
     )
 
-    body = http_session.get(eplus_url).text
+    body = session.get(eplus_url).text
 
     data_json = schema_data_json.validate(body, "data_json")
     if not data_json:
@@ -88,28 +88,25 @@ def _get_eplus_data(http_session: HTTPSession, eplus_url: str):
         raise PluginError("Failed to get list_channels")
 
     stream_session = schema_stream_session.validate(body, "stream_session")
+    if not stream_session:
+        raise PluginError("Failed to get stream_session")
 
     app_id = data_json["app_id"]
 
-    if "ex/player?ib=" in eplus_url:
-        # Eplus inbound
-        session_update_url = eplus_url
-    else:
-        # Eplus local
-        session_update_url = f"https://live.eplus.jp/api/stream/{app_id}/status?sid={stream_session}"
+    session_update_url = f"https://live.eplus.jp/api/stream/{app_id}/status?sid={stream_session}"
 
     return {
-        "id": app_id,
+        "app_id": app_id,
         "title": data_json["app_name"],
         "channel_urls": channel_urls,
         "session_update_url": session_update_url,
     }
 
 
-def _check_auth_status_and_try_login(http_session: HTTPSession, eplus_url: str, login_id: str, password: str):
+def _try_login(session: HTTPSession, eplus_url: str, login_id: str, password: str):
     log.info("Getting auth status")
 
-    res = http_session.get(eplus_url)
+    res = session.get(eplus_url)
     if res.url.startswith(eplus_url):
         # already logged in or no login required
         return
@@ -120,14 +117,14 @@ def _check_auth_status_and_try_login(http_session: HTTPSession, eplus_url: str, 
     if not cltft_token:
         raise PluginError("Unable to get X-CLTFT-Token for login")
 
-    http_session.cookies.set("X-CLTFT-Token", cltft_token, domain="live.eplus.jp")
+    session.cookies.set("X-CLTFT-Token", cltft_token, domain="live.eplus.jp")
 
-    if login_id is None or password is None:
+    if not all((login_id, password)):
         raise PluginError("Login credentials required")
 
     log.info("Sending pre-login info")
 
-    login_res = http_session.post(
+    login_res = session.post(
         "https://live.eplus.jp/member/api/v1/FTAuth/idpw", headers={
             "Content-Type": "application/json; charset=UTF-8",
             "Referer": auth_url,
@@ -137,14 +134,14 @@ def _check_auth_status_and_try_login(http_session: HTTPSession, eplus_url: str, 
             "loginId": login_id,
             "loginPassword": password,
         })
-    login_json = http_session.json(login_res, "login response")
+    login_json = session.json(login_res, "login response")
 
     if not login_json.get("isSuccess"):
         raise PluginError("Login failed: Invalid id or password")
 
     log.info("Logging in via provided id and password")
 
-    http_session.post(
+    session.post(
         auth_url, data=urlencode({
             "loginId": id,
             "loginPassword": password,
@@ -156,12 +153,35 @@ def _check_auth_status_and_try_login(http_session: HTTPSession, eplus_url: str, 
         })
 
 
-def _get_eplus_data_func(eplus_url: str, login_id: str, password: str) -> Callable[[HTTPSession], Dict[str, str]]:
-    def __getter(http_session: HTTPSession):
-        _check_auth_status_and_try_login(http_session, eplus_url, login_id, password)
-        return _get_eplus_data(http_session, eplus_url)
+class EplusData:
+    @property
+    def app_id(self) -> str:
+        return self._data["app_id"]
 
-    return __getter
+    @property
+    def title(self) -> str:
+        return self._data["title"]
+
+    @property
+    def channel_urls(self) -> List[str]:
+        return self._data["channel_urls"]
+
+    @property
+    def session_update_url(self) -> str:
+        return self._data["session_update_url"]
+
+    def __init__(self, session: HTTPSession, eplus_url: str, login_id: str, password: str, allow_relogin: bool):
+        self._session = session
+        self._eplus_url = eplus_url
+        self._login_id = login_id
+        self._password = password
+        self._allow_relogin = allow_relogin
+
+        self.login_and_refresh()
+
+    def login_and_refresh(self):
+        _try_login(self._session, self._eplus_url, self._login_id, self._password)
+        self._data = _get_eplus_data(self._session, self._eplus_url)
 
 
 class EplusSessionUpdater(Thread):
@@ -171,15 +191,17 @@ class EplusSessionUpdater(Thread):
     otherwise we may got HTTP 403 and no new stream could be downloaded.
     """
 
-    def __init__(self, session: Streamlink, eplus_data_getter: Callable[[HTTPSession], Dict[str, str]]):
-        self._eplus_data_getter = eplus_data_getter
+    def __init__(self, session: HTTPSession, eplus_data: EplusData):
         self._session = session
         self._closed = Event()
         self._retries = 0
         self._last_expire_timestamp = time.time()
         self._log = logging.getLogger(f"{__name__}.{self.__class__.__qualname__}")
 
-        self._session_update_url = self._eplus_data_getter(self._session.http).get("session_update_url") or ""
+        self._eplus_data = eplus_data
+        self._session_update_url = self._eplus_data.session_update_url
+        # Sometimes the previously obtained stream session is invalid, so we need to try again unconditionally.
+        self._never_valid_session = True
 
         super().__init__(name=self.__class__.__qualname__, daemon=True)
 
@@ -216,25 +238,23 @@ class EplusSessionUpdater(Thread):
                 self._log.debug(
                     "Found a valid cookie that will expire at "
                     f"{time.strftime(r'%Y%m%d-%H%M%S%z', time.localtime(cookie.expires))}. "
-                    f"The cookie: {repr(cookie)}"
+                    f"The cookie: {cookie!r}"
                 )
 
                 # Update the global session with the new cookies.
-                self._session.http.cookies.clear()
-                self._session.http.cookies.update(fresh_response.cookies)
+                self._session.cookies.clear()
+                self._session.cookies.update(fresh_response.cookies)
 
                 self._retries = 0
                 self._last_expire_timestamp = cookie.expires
+                self._never_valid_session = False
 
                 # Refresh cookies at most 5 minutes before expiration.
                 wait_sec = (cookie.expires - 5 * 60) - time.time()
-                if wait_sec < 0:
-                    # It's too close! Retry it right away.
-                    wait_sec = 0
-                elif wait_sec > 900:
-                    # Eplus local refresh cookies within 15 minutes.
-                    # The "expires" in the cookies should not be trusted.
-                    wait_sec = 900
+                # Don't be too close! Retry it right away.
+                wait_sec = max(wait_sec, 0)
+                # Eplus refreshes cookies every 15 minutes.
+                wait_sec = min(15 * 60, wait_sec)
 
                 self._log.debug(
                     "Refreshed cookies. Next attempt will be at about "
@@ -248,16 +268,19 @@ class EplusSessionUpdater(Thread):
                 # next() exhausted all cookies.
                 self._log.error("No valid cookies found.")
 
-                if "ex/player?ib=" not in self._session_update_url:
-                    # Re-login may help
-                    logged_in_http_session = self._session_duplicator()
-                    # Let it raise; we need logs
-                    self._session_update_url = self._eplus_data_getter(logged_in_http_session)["session_update_url"]
-                    self._session.http.cookies.clear()
-                    self._session.http.cookies.update(logged_in_http_session.cookies)
+                # Re-login may help
+                if self._never_valid_session or self._eplus_data._allow_relogin:
+                    self._log.info("Trying to refresh the session. Any existing sessions will be kicked.")
+                    try:
+                        self._eplus_data.login_and_refresh()
+                        self._session_update_url = self._eplus_data.session_update_url
+                    except Exception as e:
+                        self._log.error(f"Failed to refresh session: {e!r}")
+                else:
+                    self._log.info("The session will not be refreshed since re-login is disabled.")
 
             except Exception as e:
-                self._log.error(f"Failed to refresh cookies: {e}")
+                self._log.error(f"Failed to refresh cookies: {e!r}")
 
             self._retries += 1
             retry_delay_sec = 2 ** (self._retries - 1)
@@ -280,12 +303,12 @@ class EplusSessionUpdater(Thread):
 
         new_session = HTTPSession()
 
-        new_session.proxies = self._session.http.proxies
-        new_session.headers = self._session.http.headers
-        new_session.trust_env = self._session.http.trust_env
-        new_session.verify = self._session.http.verify
-        new_session.cert = self._session.http.cert
-        new_session.timeout = self._session.http.timeout
+        new_session.proxies = self._session.proxies
+        new_session.headers = self._session.headers
+        new_session.trust_env = self._session.trust_env
+        new_session.verify = self._session.verify
+        new_session.cert = self._session.cert
+        new_session.timeout = self._session.timeout
 
         return new_session
 
@@ -321,11 +344,9 @@ class EplusHLSStreamWorker(HLSStreamWorker):
 class EplusHLSStreamReader(HLSStreamReader):
     __worker__ = EplusHLSStreamWorker
 
-    def __init__(self, *args, eplus_data_getter: Callable[[HTTPSession], Dict[str, str]], **kwargs):
-        super().__init__(*args, **kwargs)
-        self.session_updater = EplusSessionUpdater(
-            session=self.session, eplus_data_getter=eplus_data_getter
-        )
+    def __init__(self, stream: "EplusHLSStream", *args, **kwargs):
+        super().__init__(stream, *args, **kwargs)
+        self.session_updater = EplusSessionUpdater(self.session.http, stream._eplus_data)
 
     def open(self):
         super().open()
@@ -338,16 +359,14 @@ class EplusHLSStreamReader(HLSStreamReader):
 
 class EplusHLSStream(HLSStream):
     __reader__ = EplusHLSStreamReader
-    _eplus_data_getter: Callable[[HTTPSession], Dict[str, str]]
+    _eplus_data: EplusData
 
-    def __init__(self, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-
-    def open(self):
-        reader = self.__reader__(self, eplus_data_getter=self._eplus_data_getter)
-        reader.open()
-
-        return reader
+    @classmethod
+    def parse_variant_playlist(cls, session, m3u8_url, eplus_data: EplusData):
+        the_map: Dict[str, EplusHLSStream] = super().parse_variant_playlist(session, m3u8_url)
+        for _, stream in the_map.items():
+            stream._eplus_data = eplus_data
+        return the_map
 
 
 # Eplus inbound pages
@@ -362,17 +381,18 @@ class EplusHLSStream(HLSStream):
 ))
 @pluginargument(
     "id",
-    sensitive=True,
-    argument_name="eplus-id",
     metavar="ID",
     help="The email address or mobile phone number associated with your Eplus account",
 )
 @pluginargument(
     "password",
-    sensitive=True,
-    argument_name="eplus-password",
     metavar="PASSWORD",
     help="The password of your Eplus account",
+)
+@pluginargument(
+    "allow-relogin",
+    action="store_true",
+    help="Allow to kick other sessions",
 )
 class Eplus(Plugin):
 
@@ -389,30 +409,27 @@ class Eplus(Plugin):
             }
         )
         self.title = None
-        self._log = logging.getLogger(f"{__name__}.{self.__class__.__qualname__}")
-        self._eplus_data_getter = _get_eplus_data_func(
-            self.url, self.get_option("id"), self.get_option("password")
-        )
-
-    def get_title(self):
-        return self.title
 
     def _get_streams(self):
-        data = self._eplus_data_getter(self.session.http)
-        self.id = data.get("id")
-        self.title = data.get("title")
-        channel_urls = data.get("channel_urls") or []
+        eplus_data = EplusData(
+            self.session.http,
+            self.url,
+            self.get_option("id"),
+            self.get_option("password"),
+            self.get_option("allow-relogin"),
+        )
+        self.id = eplus_data.app_id
+        self.title = eplus_data.title
+        channel_urls = eplus_data.channel_urls
 
         # Multiple m3u8 playlists? I have never seen it.
         # For recent events of "Revue Starlight", a "multi-angle video" does not mean that there are
         #   multiple playlists, but multiple cameras in one video. That's an edited video so viewers
         #   cannot switch views.
         for channel_url in channel_urls:
-            for name, stream in EplusHLSStream.parse_variant_playlist(
-                self.session, channel_url
-            ).items():
-                stream._eplus_data_getter = self._eplus_data_getter
-                yield name, stream
+            yield from EplusHLSStream.parse_variant_playlist(
+                self.session, channel_url, eplus_data,
+            ).items()
 
 
 __plugin__ = Eplus

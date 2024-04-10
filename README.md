@@ -30,7 +30,8 @@ https://eplus.jp/ plugin.
   Specifying `ci_session` cookie by `--http-cookie` option is another way to
   access restricted content.
 - Streamlink will count as one (desktop browser) "device" against the e+ limit
-  when viewing a stream or VOD.
+  when viewing a stream or VOD. Set `--eplus-allow-relogin` to kick other
+  "devices" during download.
 - `--player-passthrough=hls` is incompatible with e+ since the video player
   will not have access to the authenticated HTTP session.
 - DRM-protected content is NOT supported. If you have been notified that an
