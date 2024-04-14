@@ -37,7 +37,7 @@ def _get_eplus_data(session: HTTPSession, eplus_url: str):
             },
         ),
     )
-    schema_list_channels = validate.Schema(
+    schema_m3u8_urls = validate.Schema(
         re.compile(r"var\s+listChannels\s*=\s*(?P<list_channels>\[.+?\]);"),
         validate.none_or_all(
             validate.get("list_channels"),
@@ -83,9 +83,7 @@ def _get_eplus_data(session: HTTPSession, eplus_url: str):
     else:
         raise PluginError(f"Unknown delivery_status: {delivery_status}")
 
-    channel_urls = schema_list_channels.validate(body, "list_channels")
-    if not channel_urls:
-        raise PluginError("Failed to get list_channels")
+    m3u8_urls = schema_m3u8_urls.validate(body, "m3u8 urls")
 
     stream_session = schema_stream_session.validate(body, "stream_session")
     if not stream_session:
@@ -98,7 +96,7 @@ def _get_eplus_data(session: HTTPSession, eplus_url: str):
     return {
         "app_id": app_id,
         "title": data_json["app_name"],
-        "channel_urls": channel_urls,
+        "m3u8_urls": m3u8_urls,
         "session_update_url": session_update_url,
     }
 
@@ -163,8 +161,8 @@ class EplusData:
         return self._data["title"]
 
     @property
-    def channel_urls(self) -> List[str]:
-        return self._data["channel_urls"]
+    def m3u8_urls(self) -> List[str]:
+        return self._data["m3u8_urls"]
 
     @property
     def session_update_url(self) -> str:
@@ -420,15 +418,15 @@ class Eplus(Plugin):
         )
         self.id = eplus_data.app_id
         self.title = eplus_data.title
-        channel_urls = eplus_data.channel_urls
+        m3u8_urls = eplus_data.m3u8_urls
 
         # Multiple m3u8 playlists? I have never seen it.
         # For recent events of "Revue Starlight", a "multi-angle video" does not mean that there are
         #   multiple playlists, but multiple cameras in one video. That's an edited video so viewers
         #   cannot switch views.
-        for channel_url in channel_urls:
+        for m3u8_url in m3u8_urls:
             yield from EplusHLSStream.parse_variant_playlist(
-                self.session, channel_url, eplus_data,
+                self.session, m3u8_url, eplus_data,
             ).items()
 
 
