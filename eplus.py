@@ -42,6 +42,7 @@ def _get_eplus_data(session: HTTPSession, eplus_url: str):
         validate.none_or_all(
             validate.get("list_channels"),
             validate.parse_json(),
+            list,
         ),
     )
     schema_stream_session = validate.Schema(
@@ -84,6 +85,8 @@ def _get_eplus_data(session: HTTPSession, eplus_url: str):
         raise PluginError(f"Unknown delivery_status: {delivery_status}")
 
     m3u8_urls = schema_m3u8_urls.validate(body, "m3u8 urls")
+    if not m3u8_urls:
+        raise PluginError("Failed to get m3u8 urls")
 
     stream_session = schema_stream_session.validate(body, "stream_session")
     if not stream_session:
