@@ -13,7 +13,8 @@ from urllib.parse import urlencode
 
 from streamlink.exceptions import NoStreamsError, PluginError
 from streamlink.plugin import Plugin, pluginargument, pluginmatcher
-from streamlink.plugin.api import validate, useragents, HTTPSession
+from streamlink.plugin.api import validate, useragents
+from streamlink.session.http import HTTPSession
 from streamlink.stream.hls import HLSStream, HLSStreamReader, HLSStreamWorker
 
 log = logging.getLogger(__name__)
