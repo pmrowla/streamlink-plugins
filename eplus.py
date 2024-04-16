@@ -84,17 +84,15 @@ def _get_eplus_data(session: HTTPSession, eplus_url: str):
     else:
         raise PluginError(f"Unknown delivery_status: {delivery_status}")
 
-    m3u8_urls = schema_m3u8_urls.validate(body, "m3u8 urls")
-    if not m3u8_urls:
-        raise PluginError("Failed to get m3u8 urls")
-
-    stream_session = schema_stream_session.validate(body, "stream_session")
-    if not stream_session:
-        raise PluginError("Failed to get stream_session")
+    m3u8_urls = schema_m3u8_urls.validate(body, "m3u8 urls") or []
 
     app_id = data_json["app_id"]
 
-    session_update_url = f"https://live.eplus.jp/api/stream/{app_id}/status?sid={stream_session}"
+    stream_session = schema_stream_session.validate(body, "stream_session")
+    if stream_session:
+        session_update_url = f"https://live.eplus.jp/api/stream/{app_id}/status?sid={stream_session}"
+    else:
+        session_update_url = ""
 
     return {
         "app_id": app_id,
@@ -193,6 +191,8 @@ class EplusSessionUpdater(Thread):
     """
 
     def __init__(self, session: HTTPSession, eplus_data: EplusData):
+        super().__init__(name=self.__class__.__qualname__, daemon=True)
+
         self._session = session
         self._closed = Event()
         self._retries = 0
@@ -203,8 +203,6 @@ class EplusSessionUpdater(Thread):
         self._session_update_url = self._eplus_data.session_update_url
         # Sometimes the previously obtained stream session is invalid, so we need to try again unconditionally.
         self._never_valid_session = True
-
-        super().__init__(name=self.__class__.__qualname__, daemon=True)
 
     def close(self):
         if self._closed.is_set():
@@ -312,6 +310,13 @@ class EplusSessionUpdater(Thread):
         new_session.timeout = self._session.timeout
 
         return new_session
+    
+    @classmethod
+    def make(cls, session: HTTPSession, eplus_data: EplusData):
+        if eplus_data.session_update_url:
+            return cls(session, eplus_data)
+        else:
+            return None
 
 
 class EplusHLSStreamWorker(HLSStreamWorker):
@@ -349,23 +354,25 @@ class EplusHLSStreamReader(HLSStreamReader):
 
     def open(self):
         super().open()
-        self.stream._session_updater.start()
+        if self.stream._session_updater:
+            self.stream._session_updater.start()
 
     def close(self):
         super().close()
-        self.stream._session_updater.close()
+        if self.stream._session_updater:
+            self.stream._session_updater.close()
 
 
 class EplusHLSStream(HLSStream):
     __reader__ = EplusHLSStreamReader
 
-    _session_updater: EplusSessionUpdater
+    _session_updater: EplusSessionUpdater | None
 
     @classmethod
     def parse_variant_playlist(cls, session, m3u8_url, eplus_data: EplusData):
         the_map: Dict[str, EplusHLSStream] = super().parse_variant_playlist(session, m3u8_url)
         for _, stream in the_map.items():
-            stream._session_updater = EplusSessionUpdater(session.http, eplus_data)
+            stream._session_updater = EplusSessionUpdater.make(session.http, eplus_data)
         return the_map
 
 
