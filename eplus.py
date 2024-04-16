@@ -227,7 +227,7 @@ class EplusSessionUpdater(Thread):
             self._log.debug(f"Refreshing cookies with url: {self._session_update_url}")
             try:
                 fresh_response = self._session_duplicator().get(self._session_update_url)
-                self._log.debug(f"Got new cookies: {repr(fresh_response.cookies)}")
+                self._log.debug(f"Got new cookies: {fresh_response.cookies!r}")
 
                 # Filter cookies.
                 # For now, only the "ci_session" cookie is what we don't need, so ignore it.
@@ -345,28 +345,27 @@ class EplusHLSStreamWorker(HLSStreamWorker):
 class EplusHLSStreamReader(HLSStreamReader):
     __worker__ = EplusHLSStreamWorker
 
-    def __init__(self, stream: "EplusHLSStream", *args, **kwargs):
-        super().__init__(stream, *args, **kwargs)
-        self.session_updater = EplusSessionUpdater(self.session.http, stream._eplus_data)
+    stream: "EplusHLSStream"
 
     def open(self):
         super().open()
-        self.session_updater.start()
+        self.stream._session_updater.start()
 
     def close(self):
         super().close()
-        self.session_updater.close()
+        self.stream._session_updater.close()
 
 
 class EplusHLSStream(HLSStream):
     __reader__ = EplusHLSStreamReader
-    _eplus_data: EplusData
+
+    _session_updater: EplusSessionUpdater
 
     @classmethod
     def parse_variant_playlist(cls, session, m3u8_url, eplus_data: EplusData):
         the_map: Dict[str, EplusHLSStream] = super().parse_variant_playlist(session, m3u8_url)
         for _, stream in the_map.items():
-            stream._eplus_data = eplus_data
+            stream._session_updater = EplusSessionUpdater(session.http, eplus_data)
         return the_map
 
 
