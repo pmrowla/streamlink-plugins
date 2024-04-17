@@ -8,13 +8,16 @@ import logging
 import re
 import time
 from threading import Thread, Event
-from typing import Dict, List
+from typing import Dict, List, Optional
 from urllib.parse import urlencode
 
 from streamlink.exceptions import NoStreamsError, PluginError
 from streamlink.plugin import Plugin, pluginargument, pluginmatcher
 from streamlink.plugin.api import validate, useragents
-from streamlink.session.http import HTTPSession
+try:
+    from streamlink.session.http import HTTPSession  # from 6.6.0
+except ImportError:
+    from streamlink.plugin.api import HTTPSession
 from streamlink.stream.hls import HLSStream, HLSStreamReader, HLSStreamWorker
 
 log = logging.getLogger(__name__)
@@ -367,7 +370,7 @@ class EplusHLSStreamReader(HLSStreamReader):
 class EplusHLSStream(HLSStream):
     __reader__ = EplusHLSStreamReader
 
-    _session_updater: EplusSessionUpdater | None
+    _session_updater: Optional[EplusSessionUpdater]
 
     @classmethod
     def parse_variant_playlist(cls, session, m3u8_url, eplus_data: EplusData):
