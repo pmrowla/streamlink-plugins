@@ -398,6 +398,7 @@ class EplusHLSStream(HLSStream):
 @pluginargument(
     "password",
     metavar="PASSWORD",
+    sensitive=True,
     help="The password of your Eplus account",
 )
 @pluginargument(
