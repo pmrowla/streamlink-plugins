@@ -393,6 +393,7 @@ class EplusHLSStream(HLSStream):
 @pluginargument(
     "id",
     metavar="ID",
+    sensitive=True,
     help="The email address or mobile phone number associated with your Eplus account",
 )
 @pluginargument(
