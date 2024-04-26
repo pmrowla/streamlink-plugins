@@ -1,6 +1,6 @@
 # streamlink-plugins
 
-Custom plugins for [Streamlink](https://github.com/streamlink/streamlink) 4.3.0 and newer versions.
+Custom plugins for [Streamlink](https://github.com/streamlink/streamlink) 5.5.0 and newer versions with Python 3.8 and newer version.
 
 To use these plugins, clone this repo somewhere and run (or configure) streamlink with `--plugin-dir`.
 Alternatively, individual plugins can be symlinked or downloaded to `~/.config/streamlink/plugins`
@@ -23,9 +23,15 @@ Alternatively, individual plugins can be symlinked or downloaded to `~/.config/s
 
 https://eplus.jp/ plugin.
 
-- Currently only supports direct `live.eplus.jp` (ticketed) stream or VOD URLs.
+- Supports `live.eplus.jp` (local) and `live.eplus.jp/ex/player?ib=` (inbound)
+  stream or VOD URLs.
+- Login required to view live event or VOD on `live.eplus.jp`. `--eplus-id`
+  and `--eplus-password` options can be used to specify login credentials.
+  Specifying `ci_session` cookie by `--http-cookie` option is another way to
+  access restricted content.
 - Streamlink will count as one (desktop browser) "device" against the e+ limit
-  when viewing a stream or VOD.
+  when viewing a stream or VOD. Set `--eplus-allow-relogin` to kick other
+  "devices" during download.
 - `--player-passthrough=hls` is incompatible with e+ since the video player
   will not have access to the authenticated HTTP session.
 - DRM-protected content is NOT supported. If you have been notified that an
