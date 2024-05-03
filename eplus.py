@@ -453,7 +453,6 @@ class Eplus(Plugin):
                 "User-Agent": useragents.SAFARI,
             }
         )
-        self.title = None
 
     def _get_streams(self):
         eplus_ctx = EplusCtx(

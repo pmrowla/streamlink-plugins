@@ -163,7 +163,6 @@ class Spwn(Plugin):
             "spwn-balus",
         )
         self._authed = False
-        self.title = None
 
     def _fetch_fb_api_key(self):
         # get firebase API key
