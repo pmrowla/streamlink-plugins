@@ -7,8 +7,8 @@ Requires stream/VOD URL.
 import logging
 import re
 import time
-from threading import Thread, Event
-from typing import Dict, List, Optional
+from threading import Thread, Event, Lock
+from typing import List, Optional, ClassVar
 from urllib.parse import urlencode
 
 from streamlink.exceptions import NoStreamsError, PluginError
@@ -156,7 +156,7 @@ def _try_login(session: HTTPSession, eplus_url: str, login_id: str, password: st
         })
 
 
-class EplusData:
+class EplusCtx:
     @property
     def app_id(self) -> str:
         return self._data["app_id"]
@@ -173,12 +173,31 @@ class EplusData:
     def session_update_url(self) -> str:
         return self._data["session_update_url"]
 
+    @property
+    def never_valid_session(self) -> bool:
+        """
+        Sometimes the previously obtained stream session is invalid, so we need to try again unconditionally.
+        Being a class variable does not work since boolean is a primitive data type.
+        """
+
+        return self._never_valid_session
+
+    @never_valid_session.setter
+    def never_valid_session(self, value: bool):
+        self._never_valid_session = value
+
+    @property
+    def http_session(self) -> HTTPSession:
+        return self._session
+
     def __init__(self, session: HTTPSession, eplus_url: str, login_id: str, password: str, allow_relogin: bool):
         self._session = session
         self._eplus_url = eplus_url
         self._login_id = login_id
         self._password = password
         self._allow_relogin = allow_relogin
+
+        self._never_valid_session = True
 
         self.login_and_refresh()
 
@@ -194,19 +213,16 @@ class EplusSessionUpdater(Thread):
     otherwise we may got HTTP 403 and no new stream could be downloaded.
     """
 
-    def __init__(self, session: HTTPSession, eplus_data: EplusData):
+    _eplus_ctx: ClassVar[EplusCtx]
+
+    def __init__(self):
         super().__init__(name=self.__class__.__qualname__, daemon=True)
 
-        self._session = session
+        self._session = self._eplus_ctx.http_session
         self._closed = Event()
         self._retries = 0
         self._last_expire_timestamp = time.time()
         self._log = logging.getLogger(f"{__name__}.{self.__class__.__qualname__}")
-
-        self._eplus_data = eplus_data
-        self._session_update_url = self._eplus_data.session_update_url
-        # Sometimes the previously obtained stream session is invalid, so we need to try again unconditionally.
-        self._never_valid_session = True
 
     def close(self):
         if self._closed.is_set():
@@ -226,9 +242,9 @@ class EplusSessionUpdater(Thread):
         while not self._closed.is_set():
 
             # Create a new session without cookies and send a request to Eplus url to obtain new cookies.
-            self._log.debug(f"Refreshing cookies with url: {self._session_update_url}")
+            self._log.debug(f"Refreshing cookies with url: {self._eplus_ctx.session_update_url}")
             try:
-                fresh_response = self._session_duplicator().get(self._session_update_url)
+                fresh_response = self._session_duplicator().get(self._eplus_ctx.session_update_url)
                 self._log.debug(f"Got new cookies: {fresh_response.cookies!r}")
 
                 # Filter cookies.
@@ -250,7 +266,7 @@ class EplusSessionUpdater(Thread):
 
                 self._retries = 0
                 self._last_expire_timestamp = cookie.expires
-                self._never_valid_session = False
+                self._eplus_ctx.never_valid_session = False
 
                 # Refresh cookies at most 5 minutes before expiration.
                 wait_sec = (cookie.expires - 5 * 60) - time.time()
@@ -272,11 +288,10 @@ class EplusSessionUpdater(Thread):
                 self._log.error("No valid cookies found.")
 
                 # Re-login may help
-                if self._never_valid_session or self._eplus_data._allow_relogin:
+                if self._eplus_ctx.never_valid_session or self._eplus_ctx._allow_relogin:
                     self._log.info("Trying to refresh the session. Any existing sessions will be kicked.")
                     try:
-                        self._eplus_data.login_and_refresh()
-                        self._session_update_url = self._eplus_data.session_update_url
+                        self._eplus_ctx.login_and_refresh()
                     except Exception as e:
                         self._log.error(f"Failed to refresh session: {e!r}")
                 else:
@@ -314,13 +329,41 @@ class EplusSessionUpdater(Thread):
         new_session.timeout = self._session.timeout
 
         return new_session
-    
+
+    # Prevent multiple updaters from being creating, running and stopping at the same time.
+    _updater_mgmt_mutex: ClassVar[Lock] = Lock()
+    _updater_num: ClassVar[int] = 0
+    _updater: ClassVar[Optional["EplusSessionUpdater"]] = None
+
     @classmethod
-    def make(cls, session: HTTPSession, eplus_data: EplusData):
-        if eplus_data.session_update_url:
-            return cls(session, eplus_data)
-        else:
-            return None
+    def start_one(cls):
+        with cls._updater_mgmt_mutex:
+            if not cls._eplus_ctx:
+                raise PluginError("EplusCtx has not been set yet")
+
+            # No session update required for free streams.
+            if not cls._eplus_ctx.session_update_url:
+                return
+
+            if not cls._updater:
+                cls._updater = cls()
+
+            if cls._updater_num == 0:
+                cls._updater.start()
+            cls._updater_num += 1
+
+    @classmethod
+    def stop_one(cls):
+        with cls._updater_mgmt_mutex:
+            if not cls._updater:
+                return
+
+            if cls._updater_num > 0:
+                cls._updater_num -= 1
+            if cls._updater_num == 0:
+                cls._updater.close()
+                cls._updater.join()
+                cls._updater = None
 
 
 class EplusHLSStreamWorker(HLSStreamWorker):
@@ -354,35 +397,24 @@ class EplusHLSStreamWorker(HLSStreamWorker):
 class EplusHLSStreamReader(HLSStreamReader):
     __worker__ = EplusHLSStreamWorker
 
-    stream: "EplusHLSStream"
-
     def open(self):
         super().open()
-        if self.stream._session_updater:
-            self.stream._session_updater.start()
+        EplusSessionUpdater.start_one()
 
     def close(self):
         super().close()
-        if self.stream._session_updater:
-            self.stream._session_updater.close()
+        EplusSessionUpdater.stop_one()
 
 
 class EplusHLSStream(HLSStream):
     __reader__ = EplusHLSStreamReader
 
-    _session_updater: Optional[EplusSessionUpdater]
-
-    @classmethod
-    def parse_variant_playlist(cls, session, m3u8_url, eplus_data: EplusData):
-        the_map: Dict[str, EplusHLSStream] = super().parse_variant_playlist(session, m3u8_url)
-        for _, stream in the_map.items():
-            stream._session_updater = EplusSessionUpdater.make(session.http, eplus_data)
-        return the_map
-
 
 # Eplus inbound pages
-# https://live.eplus.jp/ex/player?ib=<key>
-# key is base64-encoded 64 byte unique key per ticket
+# - https://live.eplus.jp/ex/player?ib=<key>
+#   key is base64-encoded 64 byte unique key per ticket
+# - https://live.eplus.jp/ex/player?ib=<key>&show_id=<id>
+#   there is an additional "show_id" field for pass tickets
 @pluginmatcher(re.compile(
     r"https://live\.eplus\.jp/ex/player\?ib=.+"
 ))
@@ -424,25 +456,25 @@ class Eplus(Plugin):
         self.title = None
 
     def _get_streams(self):
-        eplus_data = EplusData(
+        eplus_ctx = EplusCtx(
             self.session.http,
             self.url,
             self.get_option("id"),
             self.get_option("password"),
             self.get_option("allow-relogin"),
         )
-        self.id = eplus_data.app_id
-        self.title = eplus_data.title
-        m3u8_urls = eplus_data.m3u8_urls
+        self.id = eplus_ctx.app_id
+        self.title = eplus_ctx.title
+        m3u8_urls = eplus_ctx.m3u8_urls
+
+        EplusSessionUpdater._eplus_ctx = eplus_ctx
 
         # Multiple m3u8 playlists? I have never seen it.
         # For recent events of "Revue Starlight", a "multi-angle video" does not mean that there are
         #   multiple playlists, but multiple cameras in one video. That's an edited video so viewers
         #   cannot switch views.
         for m3u8_url in m3u8_urls:
-            yield from EplusHLSStream.parse_variant_playlist(
-                self.session, m3u8_url, eplus_data,
-            ).items()
+            yield from EplusHLSStream.parse_variant_playlist(self.session, m3u8_url).items()
 
 
 __plugin__ = Eplus
