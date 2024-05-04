@@ -34,7 +34,11 @@ def _get_eplus_data(session: HTTPSession, eplus_url: str):
             validate.parse_json(),
             {
                 "delivery_status": str,
-                "archive_mode": str,
+
+                # For pass tickets, the "archive_mode" field exists but its value is null.
+                validate.optional("archive_mode"): validate.any(str, None),
+                validate.optional("is_pass_ticket"): validate.any(str, None),
+
                 "app_id": str,
                 "app_name": str,
                 validate.optional("drm_mode"): validate.any(str, None),
@@ -61,6 +65,9 @@ def _get_eplus_data(session: HTTPSession, eplus_url: str):
     data_json = schema_data_json.validate(body, "data_json")
     if not data_json:
         raise PluginError("Failed to get data_json")
+
+    if data_json.get("is_pass_ticket") == "YES":
+        raise PluginError("Pass ticket is not supported, please use a url points to the player page")
 
     if data_json.get("drm_mode") == "ON":
         raise PluginError("Stream is DRM-protected")
