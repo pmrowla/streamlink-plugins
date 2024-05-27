@@ -53,7 +53,6 @@ class Zan(Plugin):
             }
         )
         self._authed = False
-        self.title = None
 
     def _login(self):
         if self._authed:
