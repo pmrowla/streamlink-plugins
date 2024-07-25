@@ -46,7 +46,8 @@ https://spwn.jp/ plugin.
 - Login and valid event ticket required to view any live event or VOD.
   `--spwn-email` and `--spwn-password` options can be used to specify login
   credentials. Social account (Twitter/Facebook/Google) login requires
-  specifying the OAuth refresh token directly with `--spwn-token`.
+  specifying the OAuth refresh token (i.e., `refresh_token`) directly with
+  `--spwn-token`.
 - When the `--spwn-low-latency` option is set and a low-latency (LL) stream is
   available, it will be preferred over the default stream.
   (`--spwn-low-latency` has no effect for VOD URLs)
