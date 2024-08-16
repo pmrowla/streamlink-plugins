@@ -111,7 +111,7 @@ class FBSession:
 
 
 @pluginmatcher(re.compile(
-    r"https://(virtual\.)?spwn\.jp/events/(?P<eid>[^/]+)"
+    r"https://(virtual\.)?spwn\.jp/_?events/(?P<eid>[^/]+)"
 ))
 @pluginargument(
     "email",
@@ -209,9 +209,6 @@ class Spwn(Plugin):
 
         return super().stream_weight(stream)
 
-    def get_title(self):
-        return self.title
-
     @staticmethod
     def _raise_ticket(stream_info):
         if not stream_info.get("hasTickets"):
@@ -224,7 +221,18 @@ class Spwn(Plugin):
             raise PluginError("SPWN login failed") from e
         eid = self.match.group("eid")
         event_info = self._get_event_info(eid)
-        self.title = event_info.get("title", eid)
+
+        self.id = eid
+        self.title = event_info.get("title")
+        if not self.title:
+            self.url = self.url.replace("/_events/", "/events/")
+            res = self.session.http.get(self.url)
+            res.encoding = res.apparent_encoding  # override "ISO-8859-1" by "utf-8"
+            self.title = validate.Schema(
+                validate.parse_html(),
+                validate.xml_xpath_string(".//head/meta[@property='og:title'][@content][1]/@content"),
+            ).validate(res.text)
+
         log.info(f"Found SPWN event: {self.title}")
         stream_info = self._get_streaming_key(eid)
         if stream_info.get("isError"):
@@ -280,9 +288,8 @@ class Spwn(Plugin):
     def _get_goods_data(self, eid):
         url = f"{self._BALUS_URL}/getSellingGoods/"
         result = self.session.http.get(url, params={"eventId": eid})
-        title = ""
         goods = result.json().get("data", [])
-        title = goods[-1].get("eventTitle", eid) if goods else eid
+        title = goods[-1].get("eventTitle", eid) if goods else None
         return {"title": title, "parts": [{"name": ""}]}
 
     def _get_parts(self, event_info, stream_info, opt_id=None):
