@@ -6,7 +6,9 @@ Requires valid SPWN account and event tickets.
 
 import logging
 import re
+import urllib.parse
 from datetime import datetime, timedelta
+from pathlib import PurePosixPath
 from typing import Any, Dict, NamedTuple
 
 import requests
@@ -322,7 +324,9 @@ class Spwn(Plugin):
             except IndexError:
                 name = f"part{i}"
             if len(parts) > 1 or len(video_ids) > 1:
-                log.info(f"Multi-part event: {name} ({video_id})")
+                feed_path = self._get_feed_path(video_id, cookies)
+                feed_name = f": {feed_path}" if feed_path else ""
+                log.info(f"Multi-part event: {name} ({video_id}{feed_name})")
             if not url or (opt_id and video_id != opt_id):
                 continue
             yield VideoPart(
@@ -332,5 +336,19 @@ class Spwn(Plugin):
                 cookie,
             )
 
+    def _get_feed_path(self, video_id: str, cookies: dict[str, Any]) -> str | None:
+        # try to find camera/feed name via default cookie manifest URL
+        url = cookies.get(video_id, {}).get("default", {}).get("url")
+        if url:
+            parsed_url = urllib.parse.urlparse(url)
+            path = PurePosixPath(urllib.parse.unquote(parsed_url.path))
+            event_path: PurePosixPath | None = None
+            for p in path.parents:
+                if p.name == self.id:
+                    event_path = p
+                    break
+            if event_path and path.parent != event_path:
+                return str(path.parent.relative_to(event_path))
+        return None
 
 __plugin__ = Spwn
