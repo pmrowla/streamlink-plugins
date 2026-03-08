@@ -309,6 +309,7 @@ class Spwn(Plugin):
         video_ids = sorted(stream_info.get("videoIds", []))
         for i, video_id in enumerate(video_ids, start=1):
             url = None
+            is_vod = False
             if self.options.get("low-latency"):
                 ll_cookie = cookies.get(video_id, {}).get("LL", {})
                 url = ll_cookie.get("url")
@@ -324,9 +325,9 @@ class Spwn(Plugin):
             except IndexError:
                 name = f"part{i}"
             if len(parts) > 1 or len(video_ids) > 1:
-                feed_path = self._get_feed_path(video_id, cookies)
-                feed_name = f": {feed_path}" if feed_path else ""
-                log.info(f"Multi-part event: {name} ({video_id}{feed_name})")
+                feed_name = self._get_feed_name(video_id, cookies)
+                feed_s = f": {feed_name}" if feed_name else ""
+                log.info(f"Multi-part event: {name} ({video_id}{feed_s})")
             if not url or (opt_id and video_id != opt_id):
                 continue
             yield VideoPart(
@@ -336,19 +337,26 @@ class Spwn(Plugin):
                 cookie,
             )
 
-    def _get_feed_path(self, video_id: str, cookies: dict[str, Any]) -> str | None:
+    def _get_feed_name(self, video_id: str, cookies: dict[str, Any]) -> str | None:
         # try to find camera/feed name via default cookie manifest URL
         url = cookies.get(video_id, {}).get("default", {}).get("url")
         if url:
+            is_vod = False
             parsed_url = urllib.parse.urlparse(url)
+            if parsed_url.hostname and "vod.spwn" in parsed_url.hostname:
+                is_vod = True
             path = PurePosixPath(urllib.parse.unquote(parsed_url.path))
             event_path: PurePosixPath | None = None
             for p in path.parents:
                 if p.name == self.id:
                     event_path = p
                     break
+            out: list[str] = []
             if event_path and path.parent != event_path:
-                return str(path.parent.relative_to(event_path))
+                out.append(str(path.parent.relative_to(event_path)))
+            if is_vod:
+                out.append("[VOD]")
+            return " ".join(out)
         return None
 
 __plugin__ = Spwn
