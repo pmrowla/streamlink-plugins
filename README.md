@@ -3,8 +3,8 @@
 Custom plugins for [Streamlink](https://github.com/streamlink/streamlink) 5.5.0 and newer versions with Python 3.8 and newer version.
 
 To use these plugins, clone this repo somewhere and run (or configure) streamlink with `--plugin-dir`.
-Alternatively, individual plugins can be symlinked or downloaded to `~/.config/streamlink/plugins`
-(`%APPDATA%\streamlink\plugins` on Windows).
+Alternatively, individual plugins can be symlinked or downloaded to `~/.local/share/streamlink/plugins`
+(`%APPDATA%\streamlink\plugins` on Windows). See the [docs](https://streamlink.github.io/cli/plugin-sideloading.html) of streamlink for details.
 
 ## eplus (e+)
 
