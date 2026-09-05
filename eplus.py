@@ -421,9 +421,10 @@ class EplusHLSStream(HLSStream):
 # - https://live.eplus.jp/ex/player?ib=<key>
 #   key is base64-encoded 64 byte unique key per ticket
 # - https://live.eplus.jp/ex/player?ib=<key>&show_id=<id>
+#   https://live.eplus.jp/ex/player?show_id=<id>&ib=<key>
 #   there is an additional "show_id" field for pass tickets
 @pluginmatcher(re.compile(
-    r"https://live\.eplus\.jp/ex/player\?ib=.+"
+    r"https://live\.eplus\.jp/ex/player\?(?:[^&]*?&)*?ib=.+"
 ))
 # DRM test page and Eplus local pages
 @pluginmatcher(re.compile(
