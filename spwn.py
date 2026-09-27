@@ -178,17 +178,17 @@ class Spwn(Plugin):
 
         for script in scripts:
             src = script.get("src", "")
-            m = re.match(r"/static/js/main.*\.js", src)
+            if not re.match(r"/static/js/.*\.js", src):
+                continue
+            body = self.session.http.get(f"{self._BASE_URL}{src}").text
+            m = re.search(
+                r'REACT_APP_FB_API_KEY:\s*"(?P<key>[a-zA-Z0-9\-]+)"', body
+            ) or re.search(
+                r'apiKey:\s*"(?P<key>AIza[a-zA-Z0-9_\-]+)"', body
+            )
             if m:
-                break
-        else:
-            return None
-        body = self.session.http.get(f"{self._BASE_URL}{src}").text
-        m = re.search(
-            r'REACT_APP_FB_API_KEY:\s*"(?P<key>[a-zA-Z0-9\-]+)"', body
-        )
-        if m:
-            return m.group("key")
+                log.debug(f"Found firebase api key in {src}")
+                return m.group("key")
         return None
 
     def _login(self):
