@@ -182,9 +182,8 @@ class Spwn(Plugin):
                 continue
             body = self.session.http.get(f"{self._BASE_URL}{src}").text
             m = re.search(
-                r'REACT_APP_FB_API_KEY:\s*"(?P<key>[a-zA-Z0-9\-]+)"', body
-            ) or re.search(
-                r'apiKey:\s*"(?P<key>AIza[a-zA-Z0-9_\-]+)"', body
+                r'(?:REACT_APP_FB_API_KEY|apiKey):\s*"(?P<key>AIza[a-zA-Z0-9\-]+)"',
+                body,
             )
             if m:
                 log.debug(f"Found firebase api key in {src}")
