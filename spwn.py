@@ -306,6 +306,15 @@ class Spwn(Plugin):
         # incremented with part number, so sorting should give us the expected
         # result
         video_ids = sorted(stream_info.get("videoIds", []))
+        def _is_vod(url: str | None) -> bool:
+            hostname = urllib.parse.urlparse(url or "").hostname or ""
+            return "vod.spwn" in hostname
+
+        live_ids = [
+            vid
+            for vid in video_ids
+            if not _is_vod((cookies.get(vid, {}).get("default") or {}).get("url"))
+        ]
         for i, video_id in enumerate(video_ids, start=1):
             url = None
             is_vod = False
@@ -328,6 +337,9 @@ class Spwn(Plugin):
                 feed_s = f": {feed_name}" if feed_name else ""
                 log.info(f"Multi-part event: {name} ({video_id}{feed_s})")
             if not url or (opt_id and video_id != opt_id):
+                continue
+            if live_ids and _is_vod(url):
+                log.info(f"Skipping archive part {video_id}: live stream available")
                 continue
             yield VideoPart(
                 video_id,
