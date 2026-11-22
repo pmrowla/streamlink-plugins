@@ -78,7 +78,7 @@ class FBSession:
 
     @property
     def id_token(self):
-        if self._id_token and self.expires < datetime.now():
+        if self._id_token and self.expires > datetime.now() + timedelta(seconds=60):
             return self._id_token
         if not self.refresh_token:
             raise ValueError("Not logged in, no refresh token")
@@ -265,7 +265,7 @@ class Spwn(Plugin):
         return playlist
 
     def _get_streaming_key(self, eid):
-        url = f"{self._BALUS_URL}/getStreamingKey/"
+        url = f"{self._BALUS_URL}/getStreamingKeyV2/"
         headers = {
             "Authorization": f"Bearer {self._fb.id_token}",
         }
